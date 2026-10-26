@@ -3,19 +3,25 @@
 use std::fs::Metadata;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use crate::entry::{EntryKind, FileEntry};
 use crate::error::{AppError, Result};
+use crate::log::{shell_line, Channel, Logger};
 
 pub fn home() -> Result<PathBuf> {
     dirs::home_dir().ok_or_else(|| AppError::Other("home directory not found".into()))
 }
 
-pub async fn list_dir(path: PathBuf) -> Result<Vec<FileEntry>> {
-    tokio::task::spawn_blocking(move || list_dir_blocking(&path))
+pub async fn list_dir(logger: &Arc<Logger>, path: PathBuf) -> Result<Vec<FileEntry>> {
+    let mut op = logger.start(None, Channel::Local, "readdir", path.to_string_lossy());
+    op.equivalent(shell_line(["ls", "-la"]) + " " + &shell_line([&path]));
+    let result = tokio::task::spawn_blocking(move || list_dir_blocking(&path))
         .await
-        .map_err(|e| AppError::Other(e.to_string()))?
+        .map_err(|e| AppError::Other(e.to_string()))
+        .and_then(|r| r);
+    op.result(result, |entries| Some(format!("{} voci", entries.len())))
 }
 
 fn list_dir_blocking(path: &Path) -> Result<Vec<FileEntry>> {

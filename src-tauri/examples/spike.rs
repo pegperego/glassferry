@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
+use sshfilemanager_lib::log::Logger;
 use sshfilemanager_lib::runtime_dir;
 use sshfilemanager_lib::session::{Session, SshLauncher};
 use tokio::io::AsyncReadExt;
@@ -26,6 +27,14 @@ fn main() {
 
     tauri::async_runtime::block_on(async move {
         let dir = runtime_dir::create().unwrap();
+        let logger = Logger::new(
+            Some(Arc::new(|batch| {
+                for e in batch.iter().filter(|e| e.status != sshfilemanager_lib::log::Status::Pending) {
+                    println!("[log] {:?} {} {:?} {}ms {}", e.channel, e.op, e.status, e.duration_ms.unwrap_or(0), e.detail);
+                }
+            })),
+            None,
+        );
         let server: Arc<OnceLock<Arc<AskpassServer>>> = Arc::new(OnceLock::new());
         let responder = server.clone();
         let askpass = AskpassServer::start(
@@ -42,6 +51,7 @@ fn main() {
                     responder.get().unwrap().respond(req.id, answer);
                 }
             }),
+            logger.clone(),
         )
         .unwrap();
         let _ = server.set(askpass.clone());
@@ -52,6 +62,8 @@ fn main() {
             control_path: dir.join("spike.sock"),
             log_path: dir.join("spike.log"),
             env: askpass.env_for(alias),
+            verbose: std::env::var_os("SPIKE_VERBOSE").is_some(),
+            logger: logger.clone(),
         };
 
         let t = Instant::now();
@@ -100,5 +112,6 @@ fn main() {
 
         session.close().await;
         println!("closed");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     });
 }

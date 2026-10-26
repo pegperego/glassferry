@@ -18,6 +18,12 @@ The app binary is also the `SSH_ASKPASS` helper (`askpass.rs`): when started wit
 
 Runtime files (sockets, ssh logs) live in a short private dir (`runtime_dir.rs`): `/tmp/sfm-<uid>` or `$XDG_RUNTIME_DIR/sfm`, mode 0700. Socket paths must stay short (~104 bytes on macOS).
 
+## Activity log
+
+Every ssh process, SFTP request, exec command, askpass prompt and local operation goes through `log.rs` (`Logger::start(...)` returns a `LogOp`; finish it with `ok`/`fail`/`result`, dropping it unfinished records an error). Entries carry the exact command line (`shell_line`) and, when useful, a terminal equivalent (`sftp_equivalent`). Ring buffer (default 1000, set from the UI), batched `log-batch` events every 100 ms, rotating text file in `~/Library/Logs/SSH File Manager/` (Linux: `$XDG_STATE_HOME/sshfilemanager/logs`). Never log askpass answers, tokens or the ssh environment. New backend operations must be logged.
+
+Diagnostic mode per host (UI toggle, stored in localStorage) passes `verbose` to `connect`: the master runs with `-v` and its debug output is attached to the connect entry.
+
 ## Layout
 
 - `src-tauri/src/lib.rs` — Tauri state, commands, exit cleanup
@@ -28,6 +34,8 @@ Runtime files (sockets, ssh logs) live in a short private dir (`runtime_dir.rs`)
 - `src/components/` — React function components only: `FilePane` (generic virtualized pane), `RemotePane`, `HostList`, `AskpassDialog`
 - `src/usePane.ts` — pane state hook (path, entries, sort, hidden files, selection); `src/fileList.ts` — pure sorting/selection logic (tested in `fileList.test.ts`)
 - `src/paths.ts` (remote POSIX paths), `src/format.ts`
+- `src/components/LogPanel.tsx`, `src/useActivityLog.ts`, `src/logStore.ts` (pure merge/filter, tested) — bottom log panel (⌘J)
+- `src/settings.ts` — `usePersistentState` (localStorage with safe fallbacks)
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`)
 
 ## Commands

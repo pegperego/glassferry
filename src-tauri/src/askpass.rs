@@ -17,6 +17,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 
 use crate::error::Result;
+use crate::log::{Channel, Logger};
 
 pub const ENV_SOCKET: &str = "SFM_ASKPASS_SOCKET";
 pub const ENV_TOKEN: &str = "SFM_ASKPASS_TOKEN";
@@ -94,6 +95,17 @@ fn helper(socket: &Path) -> std::io::Result<Option<String>> {
     Ok(response.value)
 }
 
+impl PromptKind {
+    fn log_name(self) -> &'static str {
+        match self {
+            PromptKind::Secret => "secret",
+            PromptKind::Confirm => "confirm",
+            PromptKind::Notice => "notice",
+            PromptKind::HostKey => "host-key",
+        }
+    }
+}
+
 fn classify(prompt: &str, hint: &str) -> PromptKind {
     match hint {
         "confirm" => PromptKind::Confirm,
@@ -111,12 +123,13 @@ pub struct AskpassServer {
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<Option<String>>>>,
     notify: Notifier,
+    logger: Arc<Logger>,
 }
 
 impl AskpassServer {
     /// Binds the socket and starts accepting helper connections.
     /// `notify` is called for every prompt that must be shown to the user.
-    pub fn start(runtime_dir: &Path, notify: Notifier) -> Result<Arc<Self>> {
+    pub fn start(runtime_dir: &Path, notify: Notifier, logger: Arc<Logger>) -> Result<Arc<Self>> {
         crate::runtime_dir::remove_stale_files(runtime_dir);
         let socket_path = runtime_dir.join(format!("askpass-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&socket_path);
@@ -130,6 +143,7 @@ impl AskpassServer {
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             notify,
+            logger,
         });
 
         let accept_server = server.clone();
@@ -186,11 +200,21 @@ impl AskpassServer {
         let request: HelperRequest = serde_json::from_str(&line)?;
 
         if request.token != self.token {
+            self.logger
+                .start(None, Channel::Askpass, "rejected", "richiesta con token non valido")
+                .fail("token non valido");
             return write.write_all(b"{\"value\":null}\n").await;
         }
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let kind = classify(&request.prompt, &request.hint);
+        // Only the prompt is logged, never the answer.
+        let op = self.logger.start(
+            Some(&request.alias),
+            Channel::Askpass,
+            kind.log_name(),
+            request.prompt.trim(),
+        );
         let request = AskpassRequest {
             id,
             alias: request.alias,
@@ -200,12 +224,21 @@ impl AskpassServer {
         let value = if kind == PromptKind::Notice {
             // ssh does not wait for an answer and kills the helper itself.
             (self.notify)(request);
+            op.ok(Some("notifica".into()));
             None
         } else {
             let (tx, rx) = oneshot::channel();
             self.pending.lock().unwrap().insert(id, tx);
             (self.notify)(request);
-            rx.await.ok().flatten()
+            let value = rx.await.ok().flatten();
+            match (&value, kind) {
+                (None, _) => op.fail("annullato dall'utente"),
+                (Some(v), PromptKind::HostKey) if v == "yes" => op.ok(Some("host key accettata".into())),
+                (Some(_), PromptKind::HostKey) => op.fail("host key rifiutata"),
+                (Some(_), PromptKind::Confirm) => op.ok(Some("confermato".into())),
+                (Some(_), _) => op.ok(Some("risposta fornita".into())),
+            }
+            value
         };
 
         let mut payload = serde_json::to_vec(&HelperResponse { value })?;

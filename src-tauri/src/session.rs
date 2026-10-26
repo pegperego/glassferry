@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
 
 use futures_util::TryStreamExt;
 use openssh_sftp_client::{Sftp, SftpOptions};
@@ -16,6 +18,7 @@ use tokio::process::{Child, Command};
 
 use crate::entry::{EntryKind, FileEntry};
 use crate::error::{AppError, Result};
+use crate::log::{sftp_equivalent, shell_line, Channel, LogOp, Logger};
 
 const CONTROL_PERSIST: &str = "ControlPersist=15m";
 const PROBE_MARKER: &str = "__SFM__";
@@ -29,7 +32,17 @@ pub struct SshLauncher {
     pub control_path: PathBuf,
     pub log_path: PathBuf,
     /// Extra environment, e.g. askpass variables. Empty means ssh uses the tty.
+    /// Never logged: it contains the askpass token.
     pub env: Vec<(String, String)>,
+    /// Diagnostic mode: `-v` on the master, debug output attached to the log.
+    pub verbose: bool,
+    pub logger: Arc<Logger>,
+}
+
+/// Command line of a prepared command, for the activity log.
+fn command_line(cmd: &Command) -> String {
+    let std = cmd.as_std();
+    shell_line(std::iter::once(std.get_program()).chain(std.get_args()))
 }
 
 impl SshLauncher {
@@ -49,13 +62,19 @@ impl SshLauncher {
         cmd
     }
 
+    fn log(&self, channel: Channel, op: &str, detail: impl Into<String>) -> LogOp {
+        self.logger.start(Some(&self.alias), channel, op, detail)
+    }
+
     /// Starts the master and waits until authentication has completed.
     pub async fn start_master(&self) -> Result<()> {
         let _ = std::fs::remove_file(&self.log_path);
-        let status = self
-            .command()
-            .args(["-M", "-N", "-f", "-o", CONTROL_PERSIST])
-            .arg("-S")
+        let mut cmd = self.command();
+        cmd.args(["-M", "-N", "-f", "-o", CONTROL_PERSIST]);
+        if self.verbose {
+            cmd.arg("-v");
+        }
+        cmd.arg("-S")
             .arg(&self.control_path)
             .arg("-E")
             .arg(&self.log_path)
@@ -63,84 +82,126 @@ impl SshLauncher {
             .arg(&self.alias)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await?;
+            .stderr(Stdio::null());
+
+        let mut op = self.log(Channel::Ssh, "connect", command_line(&cmd));
+        op.equivalent(shell_line(["ssh", "-v", "-N", "--", &self.alias]));
+        let status = match cmd.status().await {
+            Ok(status) => status,
+            Err(e) => {
+                op.fail(&e);
+                return Err(e.into());
+            }
+        };
+        let log = self.read_log();
         if !status.success() {
-            let message = self.read_log();
             let _ = std::fs::remove_file(&self.log_path);
+            let message = last_meaningful_line(&log).unwrap_or("ssh exited with an error").to_string();
+            op.output(log);
+            op.fail(&message);
             return Err(AppError::Ssh(message));
         }
+        if self.verbose {
+            op.output(log);
+        }
+        op.ok(Some(if self.verbose { "diagnostica (-v)".into() } else { "master attivo".into() }));
         Ok(())
     }
 
-    pub async fn stop_master(&self) {
-        let _ = self
-            .command()
-            .arg("-S")
+    fn stop_command(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new(&self.ssh_bin);
+        cmd.arg("-S")
             .arg(&self.control_path)
             .args(["-O", "exit", "--"])
             .arg(&self.alias)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
-        let _ = std::fs::remove_file(&self.log_path);
+            .stderr(Stdio::null());
+        cmd
+    }
+
+    pub async fn stop_master(&self) {
+        let cmd = Command::from(self.stop_command());
+        let op = self.log(Channel::Ssh, "disconnect", command_line(&cmd));
+        self.finish_stop(op, Command::from(self.stop_command()).status().await);
     }
 
     /// Blocking variant used while the app is shutting down.
     pub fn stop_master_blocking(&self) {
-        let _ = std::process::Command::new(&self.ssh_bin)
-            .arg("-S")
-            .arg(&self.control_path)
-            .args(["-O", "exit", "--"])
-            .arg(&self.alias)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let _ = std::fs::remove_file(&self.log_path);
+        let cmd = Command::from(self.stop_command());
+        let op = self.log(Channel::Ssh, "disconnect", command_line(&cmd));
+        self.finish_stop(op, self.stop_command().status());
     }
 
-    fn read_log(&self) -> String {
-        let log = std::fs::read_to_string(&self.log_path).unwrap_or_default();
-        let log = log.trim();
-        if log.is_empty() {
-            "ssh exited with an error".into()
-        } else {
-            log.to_string()
+    fn finish_stop(&self, op: LogOp, status: std::io::Result<std::process::ExitStatus>) {
+        let _ = std::fs::remove_file(&self.log_path);
+        match status {
+            Ok(s) if s.success() => op.ok(None),
+            // The master may already be gone (ControlPersist expired).
+            Ok(s) => op.ok(Some(format!("exit {}", s.code().unwrap_or(-1)))),
+            Err(e) => op.fail(e),
         }
     }
 
+    fn read_log(&self) -> String {
+        std::fs::read_to_string(&self.log_path).unwrap_or_default()
+    }
+
     /// Spawns `ssh -s <alias> sftp` over the master.
-    pub fn spawn_sftp(&self) -> Result<Child> {
-        let child = self
-            .channel_command()
-            .args(["-s", "--"])
+    pub fn spawn_sftp(&self) -> Result<(Child, LogOp)> {
+        let mut cmd = self.channel_command();
+        cmd.args(["-s", "--"])
             .arg(&self.alias)
             .arg("sftp")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
-        Ok(child)
+            .kill_on_drop(true);
+        let mut op = self.log(Channel::Ssh, "sftp-channel", command_line(&cmd));
+        op.equivalent(shell_line(["sftp", &self.alias]));
+        match cmd.spawn() {
+            Ok(child) => Ok((child, op)),
+            Err(e) => {
+                op.fail(&e);
+                Err(e.into())
+            }
+        }
     }
 
     /// Runs a remote command line (already quoted for a POSIX shell).
-    pub async fn exec(&self, command_line: &str) -> Result<std::process::Output> {
-        let output = self
-            .channel_command()
-            .arg("--")
+    pub async fn exec(&self, op_name: &str, command_line_remote: &str) -> Result<std::process::Output> {
+        let mut cmd = self.channel_command();
+        cmd.arg("--")
             .arg(&self.alias)
-            .arg(command_line)
+            .arg(command_line_remote)
             .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output()
-            .await?;
-        Ok(output)
+            .kill_on_drop(true);
+        let mut op = self.log(Channel::Exec, op_name, command_line_remote);
+        op.equivalent(command_line(&cmd).replacen(&*self.ssh_bin.to_string_lossy(), "ssh", 1));
+        match cmd.output().await {
+            Ok(output) => {
+                op.output(String::from_utf8_lossy(&output.stderr));
+                let code = output.status.code().unwrap_or(-1);
+                if output.status.success() {
+                    op.ok(Some(format!("exit {code}")));
+                } else {
+                    op.fail(format!("exit {code}"));
+                }
+                Ok(output)
+            }
+            Err(e) => {
+                op.fail(&e);
+                Err(e.into())
+            }
+        }
     }
+}
+
+/// Last non-debug line of an ssh log: usually the actual error.
+fn last_meaningful_line(log: &str) -> Option<&str> {
+    log.lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty() && !l.starts_with("debug"))
 }
 
 /// Quotes a string for a POSIX shell: `'` becomes `'\''`.
@@ -174,7 +235,7 @@ pub async fn probe(launcher: &SshLauncher) -> Capabilities {
         "echo {PROBE_MARKER}; uname -s; for c in {}; do command -v \"$c\" >/dev/null 2>&1 && echo \"$c\"; done",
         PROBED_COMMANDS.join(" ")
     );
-    let Ok(output) = launcher.exec(&sh_command(&script, &[])).await else {
+    let Ok(output) = launcher.exec("probe", &sh_command(&script, &[])).await else {
         return Capabilities::default();
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -214,7 +275,7 @@ impl Session {
     }
 
     async fn open_channels(launcher: &SshLauncher) -> Result<Self> {
-        let mut child = launcher.spawn_sftp()?;
+        let (mut child, op) = launcher.spawn_sftp()?;
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
         let mut stderr = child.stderr.take().expect("piped stderr");
@@ -223,22 +284,30 @@ impl Session {
             Ok(sftp) => sftp,
             Err(e) => {
                 let mut message = String::new();
-                let _ = stderr.read_to_string(&mut message).await;
+                let read = stderr.read_to_string(&mut message);
+                let _ = tokio::time::timeout(Duration::from_secs(2), read).await;
                 let message = message.trim();
-                return Err(if message.is_empty() {
+                let error = if message.is_empty() {
                     e.into()
                 } else {
                     AppError::Ssh(message.to_string())
-                });
+                };
+                op.fail(&error);
+                return Err(error);
             }
         };
+        op.ok(None);
         // Drain stderr so the channel never blocks on a full pipe.
         tauri::async_runtime::spawn(async move {
             let mut sink = Vec::new();
             let _ = stderr.read_to_end(&mut sink).await;
         });
 
-        let home = sftp.fs().canonicalize(".").await?;
+        let mut op = launcher.log(Channel::Sftp, "realpath", ".");
+        op.equivalent(sftp_equivalent(&launcher.alias, "pwd", &[]));
+        let home = op.result(sftp.fs().canonicalize(".").await, |home| {
+            Some(home.to_string_lossy().into_owned())
+        })?;
         let capabilities = probe(launcher).await;
         Ok(Self {
             launcher: launcher.clone(),
@@ -250,6 +319,13 @@ impl Session {
     }
 
     pub async fn list_dir(&self, path: &Path) -> Result<Vec<FileEntry>> {
+        let path_str = path.to_string_lossy();
+        let mut op = self.launcher.log(Channel::Sftp, "readdir", path_str.clone());
+        op.equivalent(sftp_equivalent(&self.launcher.alias, "ls -la", &[&path_str]));
+        op.result(self.read_dir(path).await, |entries| Some(format!("{} voci", entries.len())))
+    }
+
+    async fn read_dir(&self, path: &Path) -> Result<Vec<FileEntry>> {
         let mut fs = self.sftp.fs();
         let dir = fs.open_dir(path).await?;
         let raw: Vec<_> = dir.read_dir().try_collect().await?;

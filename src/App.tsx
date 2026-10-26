@@ -14,7 +14,10 @@ import {
 import { AskpassDialog } from "./components/AskpassDialog";
 import { FilePane } from "./components/FilePane";
 import { HostList } from "./components/HostList";
+import { LogPanel } from "./components/LogPanel";
 import { RemotePane } from "./components/RemotePane";
+import { usePersistentState } from "./settings";
+import { useActivityLog } from "./useActivityLog";
 import { usePane } from "./usePane";
 import "./App.css";
 
@@ -34,6 +37,30 @@ export default function App() {
   const [home, setHome] = useState<string | null>(null);
   const [activeSide, setActiveSide] = useState<Side>("local");
   const localPane = usePane(localListDir, home);
+  const [logOpen, setLogOpen] = usePersistentState("log.open", true);
+  const [logHeight, setLogHeight] = usePersistentState("log.height", 200);
+  const [verboseList, setVerboseList] = usePersistentState<string[]>("hosts.verbose", []);
+  const verboseHosts = new Set(verboseList);
+  const log = useActivityLog(logOpen);
+
+  const toggleLog = () => {
+    if (!logOpen) log.markSeen();
+    setLogOpen(!logOpen);
+  };
+
+  const toggleVerbose = (alias: string) =>
+    setVerboseList(verboseHosts.has(alias) ? verboseList.filter((a) => a !== alias) : [...verboseList, alias]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        toggleLog();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   useEffect(() => {
     listHosts().then(setHosts, (e) => setHostsError(String(e)));
@@ -58,7 +85,7 @@ export default function App() {
     if (connection.state === "connected") await disconnect(connection.result.sessionId);
     setConnection({ state: "connecting", alias });
     try {
-      const result = await connect(alias);
+      const result = await connect(alias, verboseHosts.has(alias));
       setConnection({ state: "connected", alias, result });
       setActiveSide("remote");
     } catch (e) {
@@ -81,36 +108,41 @@ export default function App() {
         error={hostsError}
         activeAlias={activeAlias}
         busy={connection.state === "connecting"}
+        verboseHosts={verboseHosts}
+        onToggleVerbose={toggleVerbose}
         onConnect={(alias) => void handleConnect(alias)}
       />
-      <div className="panes">
-        <FilePane
-          pane={localPane}
-          title="Locale"
-          active={activeSide === "local"}
-          onActivate={() => setActiveSide("local")}
-        />
-        {connection.state === "connected" ? (
-          <RemotePane
-            key={connection.result.sessionId}
-            alias={connection.alias}
-            connection={connection.result}
-            active={activeSide === "remote"}
-            onActivate={() => setActiveSide("remote")}
-            onDisconnect={() => void handleDisconnect()}
+      <div className="workspace">
+        <div className="panes">
+          <FilePane
+            pane={localPane}
+            title="Locale"
+            active={activeSide === "local"}
+            onActivate={() => setActiveSide("local")}
           />
-        ) : (
-          <section className="pane placeholder">
-            {connection.state === "idle" && <p>Doppio clic su un host per connetterti.</p>}
-            {connection.state === "connecting" && <p>Connessione a {connection.alias}…</p>}
-            {connection.state === "failed" && (
-              <div className="error">
-                <strong>Connessione a {connection.alias} fallita</strong>
-                <pre>{connection.error}</pre>
-              </div>
-            )}
-          </section>
-        )}
+          {connection.state === "connected" ? (
+            <RemotePane
+              key={connection.result.sessionId}
+              alias={connection.alias}
+              connection={connection.result}
+              active={activeSide === "remote"}
+              onActivate={() => setActiveSide("remote")}
+              onDisconnect={() => void handleDisconnect()}
+            />
+          ) : (
+            <section className="pane placeholder">
+              {connection.state === "idle" && <p>Doppio clic su un host per connetterti.</p>}
+              {connection.state === "connecting" && <p>Connessione a {connection.alias}…</p>}
+              {connection.state === "failed" && (
+                <div className="error">
+                  <strong>Connessione a {connection.alias} fallita</strong>
+                  <pre>{connection.error}</pre>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+        <LogPanel log={log} open={logOpen} onToggle={toggleLog} height={logHeight} onResize={setLogHeight} />
       </div>
       {prompts[0] && <AskpassDialog request={prompts[0]} onAnswer={answerPrompt} />}
     </main>

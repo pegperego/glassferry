@@ -9,6 +9,9 @@
   --selected: #dce9fb;
   --selected-inactive: #e8e8ec;
   --danger: #c4251c;
+  --danger-bg: #fdecea;
+  --ok: #1f8a3b;
+  --code-bg: #f6f6f8;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
   color: var(--fg);
@@ -26,6 +29,9 @@
     --selected: #2c4266;
     --selected-inactive: #3a3a3e;
     --danger: #ff6b61;
+    --danger-bg: #3d2423;
+    --ok: #4cc66d;
+    --code-bg: #252528;
   }
 }
 
@@ -39,7 +45,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
@@ -103,7 +110,15 @@ button.primary {
   outline: none;
 }
 
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 .panes {
+  flex: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-width: 0;
@@ -342,4 +357,340 @@ button.primary {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+.host-item {
+  display: flex;
+  align-items: center;
+}
+
+.host-diag {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  opacity: 0;
+  filter: grayscale(1);
+}
+
+.host-item:hover .host-diag,
+.host-diag:focus-visible {
+  opacity: 0.6;
+}
+
+.host-diag.on {
+  opacity: 1;
+  filter: none;
+}
+
+/* Activity log */
+
+.log-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+.log-resizer {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 2;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+}
+
+.log-panel:not(.open) .log-header {
+  border-bottom: none;
+}
+
+.log-header select,
+.log-search {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.log-search {
+  width: 160px;
+}
+
+.log-toggle {
+  border: none;
+  background: none;
+  font-weight: 600;
+  padding: 2px 4px;
+}
+
+.badge {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.error-badge {
+  background: var(--danger);
+  color: #fff;
+}
+
+.log-count,
+.log-copied,
+.muted {
+  color: var(--muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.log-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.log-body.with-details {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 38%);
+}
+
+.log-list {
+  container-type: inline-size;
+  position: relative;
+  min-height: 0;
+  display: flex;
+}
+
+.log-scroll {
+  flex: 1;
+  overflow: auto;
+}
+
+.log-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 92px 110px 64px 96px minmax(160px, 1fr) minmax(0, 220px) 64px 20px;
+  align-items: center;
+  column-gap: 8px;
+  padding: 0 8px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.log-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-row:hover {
+  background: var(--bg-alt);
+}
+
+.log-row.selected {
+  background: var(--selected);
+}
+
+.log-row.error {
+  color: var(--danger);
+}
+
+.log-row.error:not(.selected) {
+  background: var(--danger-bg);
+}
+
+.log-time,
+.log-detail,
+.log-duration {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+
+.log-time,
+.log-duration,
+.log-extra {
+  color: var(--muted);
+}
+
+.log-row.error .log-extra {
+  color: var(--danger);
+}
+
+.log-duration {
+  text-align: right;
+}
+
+.log-status {
+  text-align: center;
+}
+
+.log-row.ok .log-status {
+  color: var(--ok);
+}
+
+.log-channel {
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 4px;
+  padding: 1px 0;
+  color: #fff;
+}
+
+.ch-ssh { background: #5b5fc7; }
+.ch-sftp { background: #0f8b8d; }
+.ch-exec { background: #c26a12; }
+.ch-askpass { background: #a23c8f; }
+.ch-local { background: #6e6e73; }
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.log-new {
+  position: absolute;
+  right: 16px;
+  bottom: 8px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
+}
+
+.log-details {
+  border-left: 1px solid var(--border);
+  overflow: auto;
+  padding: 6px 10px;
+  min-width: 0;
+}
+
+.log-details header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.log-details dl {
+  margin: 0;
+}
+
+.log-details dt {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-details dd {
+  margin: 2px 0 0;
+}
+
+.log-details pre {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--code-bg);
+  border-radius: 5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+
+.log-output {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.error-text {
+  color: var(--danger);
+}
+
+button.inline {
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.popover-anchor {
+  position: relative;
+}
+
+.popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  width: 260px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+  z-index: 10;
+}
+
+.popover label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.popover input {
+  width: 90px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  padding: 2px 6px;
+}
+
+.popover p {
+  font-size: 11px;
+  margin: 6px 0 10px;
+}
+
+@container (max-width: 760px) {
+  .log-row {
+    grid-template-columns: 92px 64px 80px minmax(0, 1fr) 64px 20px;
+  }
+  .log-host,
+  .log-extra {
+    display: none;
+  }
 }

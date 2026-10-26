@@ -2,6 +2,7 @@ pub mod askpass;
 pub mod entry;
 pub mod error;
 pub mod local;
+pub mod log;
 pub mod runtime_dir;
 pub mod session;
 pub mod ssh_config;
@@ -17,6 +18,7 @@ use tauri::{Emitter, Manager, State};
 use askpass::AskpassServer;
 use error::{AppError, Result};
 use entry::FileEntry;
+use log::{LogEntry, Logger};
 use session::{Capabilities, Session, SshLauncher};
 use ssh_config::HostEntry;
 
@@ -26,6 +28,7 @@ struct AppState {
     ssh_bin: PathBuf,
     runtime_dir: PathBuf,
     askpass: Arc<AskpassServer>,
+    logger: Arc<Logger>,
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<u64, Arc<Session>>>,
 }
@@ -60,7 +63,7 @@ async fn resolve_host(state: State<'_, AppState>, alias: String) -> Result<BTree
 }
 
 #[tauri::command]
-async fn connect(state: State<'_, AppState>, alias: String) -> Result<ConnectResult> {
+async fn connect(state: State<'_, AppState>, alias: String, verbose: bool) -> Result<ConnectResult> {
     let id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
     let launcher = SshLauncher {
@@ -68,6 +71,8 @@ async fn connect(state: State<'_, AppState>, alias: String) -> Result<ConnectRes
         control_path: state.runtime_dir.join(format!("{pid}-{id}.sock")),
         log_path: state.runtime_dir.join(format!("{pid}-{id}.log")),
         env: state.askpass.env_for(&alias),
+        verbose,
+        logger: state.logger.clone(),
         alias,
     };
     let session = Session::connect(launcher).await?;
@@ -91,8 +96,8 @@ fn local_home() -> Result<String> {
 }
 
 #[tauri::command]
-async fn local_list_dir(path: String) -> Result<Vec<FileEntry>> {
-    local::list_dir(PathBuf::from(path)).await
+async fn local_list_dir(state: State<'_, AppState>, path: String) -> Result<Vec<FileEntry>> {
+    local::list_dir(&state.logger, PathBuf::from(path)).await
 }
 
 #[tauri::command]
@@ -113,6 +118,33 @@ fn askpass_respond(state: State<'_, AppState>, id: u64, value: Option<String>) {
     state.askpass.respond(id, value);
 }
 
+#[tauri::command]
+fn log_snapshot(state: State<'_, AppState>) -> Vec<LogEntry> {
+    state.logger.snapshot()
+}
+
+#[tauri::command]
+fn log_clear(state: State<'_, AppState>) {
+    state.logger.clear();
+}
+
+#[tauri::command]
+fn log_set_capacity(state: State<'_, AppState>, capacity: usize) {
+    state.logger.set_capacity(capacity);
+}
+
+#[tauri::command]
+fn log_open_dir(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = state
+        .logger
+        .file_dir()
+        .ok_or_else(|| AppError::Other("log su file non disponibile".into()))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(code) = askpass::run_helper_if_requested() {
@@ -124,16 +156,25 @@ pub fn run() {
         .setup(|app| {
             let runtime_dir = runtime_dir::create()?;
             let handle = app.handle().clone();
+            let logger = Logger::new(
+                Some(Arc::new(move |batch| {
+                    let _ = handle.emit("log-batch", batch);
+                })),
+                Logger::default_dir(),
+            );
+            let handle = app.handle().clone();
             let askpass = AskpassServer::start(
                 &runtime_dir,
                 Arc::new(move |request| {
                     let _ = handle.emit("askpass-request", request);
                 }),
+                logger.clone(),
             )?;
             app.manage(AppState {
                 ssh_bin: PathBuf::from(DEFAULT_SSH_BIN),
                 runtime_dir,
                 askpass,
+                logger,
                 next_session_id: AtomicU64::new(1),
                 sessions: Mutex::new(HashMap::new()),
             });
@@ -147,7 +188,11 @@ pub fn run() {
             local_home,
             local_list_dir,
             disconnect,
-            askpass_respond
+            askpass_respond,
+            log_snapshot,
+            log_clear,
+            log_set_capacity,
+            log_open_dir
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

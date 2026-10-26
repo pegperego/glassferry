@@ -1,27 +1,20 @@
-import { useCallback } from "react";
-import { listDir, type ConnectResult } from "../api";
-import { usePane } from "../usePane";
+import type { ComponentProps } from "react";
+import type { ConnectResult } from "../api";
 import { FilePane } from "./FilePane";
 
-interface Props {
+type Props = Omit<ComponentProps<typeof FilePane>, "title" | "actions" | "info" | "side"> & {
   alias: string;
   connection: ConnectResult;
-  active: boolean;
-  onActivate: () => void;
   onDisconnect: () => void;
-}
+};
 
-export function RemotePane({ alias, connection, active, onActivate, onDisconnect }: Props) {
-  const list = useCallback((path: string) => listDir(connection.sessionId, path), [connection.sessionId]);
-  const pane = usePane(list, connection.home);
+export function RemotePane({ alias, connection, onDisconnect, ...paneProps }: Props) {
   const { capabilities } = connection;
-
   return (
     <FilePane
-      pane={pane}
+      {...paneProps}
+      side="remote"
       title={alias}
-      active={active}
-      onActivate={onActivate}
       actions={
         <button title="Disconnetti" onClick={onDisconnect}>
           ⏏

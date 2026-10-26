@@ -12,20 +12,28 @@ import {
   type LogFilter,
 } from "../logStore";
 import type { ActivityLog } from "../useActivityLog";
+import type { Transfers } from "../useTransfers";
+import { TransfersView } from "./TransfersView";
 
 const ROW_HEIGHT = 22;
 const CHANNELS: LogChannel[] = ["ssh", "sftp", "exec", "askpass", "local"];
 const MIN_HEIGHT = 90;
 
+export type BottomTab = "log" | "transfers";
+
 interface Props {
   log: ActivityLog;
+  transfers: Transfers;
+  tab: BottomTab;
+  onTab: (tab: BottomTab) => void;
   open: boolean;
   onToggle: () => void;
   height: number;
   onResize: (height: number) => void;
 }
 
-export function LogPanel({ log, open, onToggle, height, onResize }: Props) {
+/** Bottom panel with the activity log and the transfer queue. */
+export function BottomPanel({ log, transfers, tab, onTab, open, onToggle, height, onResize }: Props) {
   const [filter, setFilter] = useState<LogFilter>(emptyFilter);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -63,11 +71,32 @@ export function LogPanel({ log, open, onToggle, height, onResize }: Props) {
     <section className={open ? "log-panel open" : "log-panel"} style={open ? { height } : undefined}>
       {open && <div className="log-resizer" onPointerDown={startResize} />}
       <header className="log-header">
-        <button className="log-toggle" onClick={onToggle} title="Mostra/nascondi log (⌘J)">
-          {open ? "▾" : "▸"} Log
+        <button className="log-toggle" onClick={onToggle} title="Mostra/nascondi pannello (⌘J)">
+          {open ? "▾" : "▸"}
+        </button>
+        <button
+          className={tab === "log" ? "tab active" : "tab"}
+          onClick={() => (open ? onTab("log") : (onTab("log"), onToggle()))}
+        >
+          Log
           {!open && log.unseenErrors > 0 && <span className="badge error-badge">{log.unseenErrors}</span>}
         </button>
-        {open && (
+        <button
+          className={tab === "transfers" ? "tab active" : "tab"}
+          onClick={() => (open ? onTab("transfers") : (onTab("transfers"), onToggle()))}
+        >
+          Trasferimenti
+          {transfers.activeCount > 0 && <span className="badge active-badge">{transfers.activeCount}</span>}
+        </button>
+        {open && tab === "transfers" && (
+          <>
+            <span className="spacer" />
+            <button onClick={transfers.clearFinished} disabled={transfers.jobs.length === transfers.activeCount}>
+              Rimuovi completati
+            </button>
+          </>
+        )}
+        {open && tab === "log" && (
           <>
             <select
               value={filter.errorsOnly ? "errors" : "all"}
@@ -125,7 +154,8 @@ export function LogPanel({ log, open, onToggle, height, onResize }: Props) {
           </>
         )}
       </header>
-      {open && (
+      {open && tab === "transfers" && <TransfersView transfers={transfers} />}
+      {open && tab === "log" && (
         <div className={selected ? "log-body with-details" : "log-body"}>
           <LogList entries={visible} selectedId={selectedId} onSelect={setSelectedId} />
           {selected && (

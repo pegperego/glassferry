@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { isDirLike, type FileEntry } from "../api";
 import {
   clickSelect,
@@ -10,6 +10,7 @@ import {
   type SortKey,
 } from "../fileList";
 import { formatPermissions, formatSize, formatTime } from "../format";
+import { dragSourceSide, getDragPayload, setDragPayload, type DragPayload, type Side } from "../dnd";
 import { joinPath, parentPath, pathSegments } from "../paths";
 import type { PaneState } from "../usePane";
 
@@ -25,12 +26,19 @@ interface Props {
   info?: ReactNode;
   active: boolean;
   onActivate: () => void;
+  side: Side;
+  /** Copy to the other pane (button and F5); absent when not possible. */
+  transfer?: { label: string; title: string; run: (names: string[]) => void };
+  /** Files dragged from the other pane, dropped into `targetDir`. */
+  onDropFiles?: (payload: DragPayload, targetDir: string) => void;
 }
 
-export function FilePane({ pane, title, actions, info, active, onActivate }: Props) {
+export function FilePane({ pane, title, actions, info, active, onActivate, side, transfer, onDropFiles }: Props) {
   const { path, visible, selection, sort } = pane;
   const scrollRef = useRef<HTMLDivElement>(null);
   const names = useMemo(() => visible.map((e) => e.name), [visible]);
+  /** Drop target while dragging: a folder row name, "" for the pane itself. */
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const virtualizer = useVirtualizer({
     count: visible.length,
@@ -74,8 +82,40 @@ export function FilePane({ pane, title, actions, info, active, onActivate }: Pro
     else if (e.key === "Escape") pane.setSelection(emptySelection);
     else if (e.key === "a" && e.metaKey) pane.setSelection(selectAll(names));
     else if (e.key === "." && e.metaKey && e.shiftKey) pane.setShowHidden(!pane.showHidden);
-    else handled = false;
+    else if (e.key === "F5" && transfer) {
+      const chosen = selectionOrCursor();
+      if (chosen.length > 0) transfer.run(chosen);
+    } else handled = false;
     if (handled) e.preventDefault();
+  };
+
+  const selectionOrCursor = () =>
+    selection.selected.size > 0 ? names.filter((n) => selection.selected.has(n)) : selection.cursor ? [selection.cursor] : [];
+
+  const acceptsDrop = (e: DragEvent) => onDropFiles !== undefined && dragSourceSide(e.dataTransfer) !== null && dragSourceSide(e.dataTransfer) !== side;
+
+  const onDragStart = (e: DragEvent, entry: FileEntry) => {
+    if (path === null) return;
+    // Dragging an unselected row drags just that row, like the Finder.
+    const dragged = selection.selected.has(entry.name) ? names.filter((n) => selection.selected.has(n)) : [entry.name];
+    setDragPayload(e.dataTransfer, { side, dir: path, names: dragged });
+  };
+
+  const onDragOver = (e: DragEvent, entry?: FileEntry) => {
+    if (!acceptsDrop(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    setDropTarget(entry && isDirLike(entry) ? entry.name : "");
+  };
+
+  const onDrop = (e: DragEvent, entry?: FileEntry) => {
+    setDropTarget(null);
+    const payload = getDragPayload(e.dataTransfer);
+    if (!payload || payload.side === side || path === null || !onDropFiles) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onDropFiles(payload, entry && isDirLike(entry) ? joinPath(path, entry.name) : path);
   };
 
   const selectedFiles = visible.filter((v) => selection.selected.has(v.name));
@@ -103,12 +143,32 @@ export function FilePane({ pane, title, actions, info, active, onActivate }: Pro
         <button title="Aggiorna" onClick={() => void pane.refresh()} disabled={pane.loading}>
           ⟳
         </button>
+        {transfer && (
+          <button
+            className="transfer-button"
+            title={`${transfer.title} (F5)`}
+            disabled={selectionOrCursor().length === 0}
+            onClick={() => transfer.run(selectionOrCursor())}
+          >
+            {transfer.label}
+          </button>
+        )}
         {actions}
       </header>
       {info && <p className="pane-info">{info}</p>}
       {pane.error && <p className="error">{pane.error}</p>}
 
-      <div className="file-list" tabIndex={0} onKeyDown={onKeyDown}>
+      <div
+        className={dropTarget === "" ? "file-list drop-target" : "file-list"}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        onDragOver={(e) => onDragOver(e)}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
+        }}
+        onDrop={(e) => onDrop(e)}
+        data-pane={side}
+      >
         <div className="file-row file-head">
           <SortHeader label="Nome" column="name" sort={sort} onSort={pane.setSort} />
           <SortHeader label="Dimensione" column="size" sort={sort} onSort={pane.setSort} className="num" />
@@ -122,6 +182,7 @@ export function FilePane({ pane, title, actions, info, active, onActivate }: Pro
               const classes = ["file-row"];
               if (selection.selected.has(entry.name)) classes.push("selected");
               if (selection.cursor === entry.name) classes.push("cursor");
+              if (dropTarget === entry.name) classes.push("drop-target");
               return (
                 <div
                   key={entry.name}
@@ -133,6 +194,10 @@ export function FilePane({ pane, title, actions, info, active, onActivate }: Pro
                     )
                   }
                   onDoubleClick={() => open(entry)}
+                  draggable={path !== null}
+                  onDragStart={(e) => onDragStart(e, entry)}
+                  onDragOver={(e) => onDragOver(e, entry)}
+                  onDrop={(e) => onDrop(e, entry)}
                 >
                   <span className="col-name" title={entry.name}>
                     <span className="icon">{icon(entry)}</span>

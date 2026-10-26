@@ -70,7 +70,13 @@ export function usePane(list: Lister, initialPath: string | null): PaneState {
     );
   }, [load, path]);
 
+  // A new lister (e.g. another session) starts from a clean state.
   useEffect(() => {
+    requestId.current++;
+    setPath(null);
+    setEntries([]);
+    setError(null);
+    setSelection(emptySelection);
     if (initialPath !== null) void navigate(initialPath);
   }, [initialPath, navigate]);
 

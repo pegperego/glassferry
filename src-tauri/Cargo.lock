@@ -3345,6 +3345,7 @@ dependencies = [
 name = "sshfilemanager"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "dirs",
  "futures-util",

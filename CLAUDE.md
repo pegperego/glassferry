@@ -24,6 +24,14 @@ Every ssh process, SFTP request, exec command, askpass prompt and local operatio
 
 Diagnostic mode per host (UI toggle, stored in localStorage) passes `verbose` to `connect`: the master runs with `-v` and its debug output is attached to the connect entry.
 
+## Transfers
+
+`transfer.rs` (`TransferManager`): a job copies a selection between a local and a remote directory, recursively (symlinks to directories are not followed). Files go to `<name>.sfm-part` and are renamed into place (remote rename uses posix-rename when available); mtime is preserved, permissions only for new files. Each file keeps 16 requests of 256 KiB in flight (`File` clones with `start_seek`); at most 3 files run at once across all jobs. Conflicts are asked one at a time per job (`transfer-conflict` event, answered with `transfer_conflict_respond`, optional apply-to-all). Progress goes to the UI as `transfer-update` every 200 ms. Every scan, mkdir, file and job is logged.
+
+Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" sfm-slow segreta <work-dir>` (`sfm-slow` adds 20 ms each way through `scripts/delay-relay.py`). Reference: ~17 MiB/s pipelined vs ~5 MiB/s sequential; OpenSSH `sftp` ~22 MiB/s on the same path.
+
+UI triggers: button Carica/Scarica and F5 in the active pane, drag & drop between panes (onto a folder row = into that folder), files dropped from the Finder on the remote pane (Tauri `onDragDropEvent`). The bottom panel has two tabs, Log and Trasferimenti.
+
 ## Layout
 
 - `src-tauri/src/lib.rs` — Tauri state, commands, exit cleanup
@@ -56,8 +64,8 @@ scripts/test-sshd.sh stop
 - Rust: errors through `AppError` (serialized as a string to the UI); async with Tokio via `tauri::async_runtime`; Unix-only code is fine (Windows is out of scope for now).
 - TypeScript strict; function components and hooks only; domain logic in plain TS modules, not in components.
 - UI text in Italian for now; code, comments and identifiers in English.
-- UI checks without the native window: run `pnpm dev` and open http://localhost:1420 with Playwright, mocking `window.__TAURI_INTERNALS__.invoke` via `page.addInitScript`.
+- UI checks without the native window: run `pnpm dev` and open http://localhost:1420 with Playwright, mocking `window.__TAURI_INTERNALS__` (`invoke`, `transformCallback`, `metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } }`) and `window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} }` via `page.addInitScript`. Events are delivered by calling the callback registered through `plugin:event|listen`.
 
 ## Out of scope (MVP)
 
-Windows, drag out to Finder, File Provider integration, chmod/chown UI, resume of interrupted transfers.
+Windows, drag out to Finder, File Provider integration, chmod/chown UI, resume of interrupted transfers, server-side copy between remote directories.

@@ -69,6 +69,12 @@ impl SshLauncher {
     /// Starts the master and waits until authentication has completed.
     pub async fn start_master(&self) -> Result<()> {
         let _ = std::fs::remove_file(&self.log_path);
+        if self.control_path.exists() {
+            // A leftover master on our socket would capture every channel
+            // (and ssh would silently disable multiplexing for the new one).
+            let _ = Command::from(self.stop_command()).status().await;
+            let _ = std::fs::remove_file(&self.control_path);
+        }
         let mut cmd = self.command();
         cmd.args(["-M", "-N", "-f", "-o", CONTROL_PERSIST]);
         if self.verbose {
@@ -325,7 +331,7 @@ impl Session {
         op.result(self.read_dir(path).await, |entries| Some(format!("{} voci", entries.len())))
     }
 
-    async fn read_dir(&self, path: &Path) -> Result<Vec<FileEntry>> {
+    pub(crate) async fn read_dir(&self, path: &Path) -> Result<Vec<FileEntry>> {
         let mut fs = self.sftp.fs();
         let dir = fs.open_dir(path).await?;
         let raw: Vec<_> = dir.read_dir().try_collect().await?;

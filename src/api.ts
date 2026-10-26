@@ -97,5 +97,70 @@ export const logOpenDir = () => invoke<void>("log_open_dir");
 export const onLogBatch = (handler: (batch: LogEntry[]) => void): Promise<UnlistenFn> =>
   listen<LogEntry[]>("log-batch", (event) => handler(event.payload));
 
+export type Direction = "upload" | "download";
+export type JobState = "scanning" | "running" | "waitingConflict" | "done" | "failed" | "cancelled";
+
+export interface JobInfo {
+  id: number;
+  sessionId: number;
+  host: string;
+  direction: Direction;
+  srcDir: string;
+  dstDir: string;
+  names: string[];
+  state: JobState;
+  totalBytes: number;
+  doneBytes: number;
+  totalFiles: number;
+  doneFiles: number;
+  skippedFiles: number;
+  failedFiles: number;
+  current: string | null;
+  bytesPerSec: number;
+  startedAt: number;
+  finishedAt: number | null;
+  errors: string[];
+}
+
+export interface ConflictRequest {
+  id: number;
+  jobId: number;
+  host: string;
+  direction: Direction;
+  path: string;
+  srcSize: number;
+  srcModified: number | null;
+  dstSize: number | null;
+  dstModified: number | null;
+}
+
+export type ConflictAction = "overwrite" | "skip" | "cancel";
+
+export const transferStart = (
+  sessionId: number,
+  direction: Direction,
+  srcDir: string,
+  names: string[],
+  dstDir: string,
+) => invoke<number>("transfer_start", { sessionId, direction, srcDir, names, dstDir });
+
+export const transferCancel = (jobId: number) => invoke<void>("transfer_cancel", { jobId });
+
+export const transferList = () => invoke<JobInfo[]>("transfer_list");
+
+export const transferClearFinished = () => invoke<void>("transfer_clear_finished");
+
+export const transferConflictRespond = (id: number, action: ConflictAction, applyToAll: boolean) =>
+  invoke<void>("transfer_conflict_respond", { id, action, applyToAll });
+
+export const onTransferUpdate = (handler: (jobs: JobInfo[]) => void): Promise<UnlistenFn> =>
+  listen<JobInfo[]>("transfer-update", (event) => handler(event.payload));
+
+export const onTransferConflict = (handler: (request: ConflictRequest) => void): Promise<UnlistenFn> =>
+  listen<ConflictRequest>("transfer-conflict", (event) => handler(event.payload));
+
+export const isFinished = (job: JobInfo) =>
+  job.state === "done" || job.state === "failed" || job.state === "cancelled";
+
 export const isDirLike = (entry: FileEntry) =>
   entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);

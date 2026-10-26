@@ -8,6 +8,8 @@ pub enum AppError {
     Sftp(#[from] openssh_sftp_client::Error),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+    #[error("annullato")]
+    Cancelled,
     #[error("session not found: {0}")]
     SessionNotFound(u64),
     #[error("{0}")]

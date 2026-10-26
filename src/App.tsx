@@ -1,24 +1,31 @@
-import { useEffect, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   askpassRespond,
   connect,
   disconnect,
+  listDir,
   listHosts,
   localHome,
   localListDir,
   onAskpassRequest,
   type AskpassRequest,
   type ConnectResult,
+  type Direction,
   type HostEntry,
+  type JobInfo,
 } from "./api";
 import { AskpassDialog } from "./components/AskpassDialog";
+import { BottomPanel, type BottomTab } from "./components/BottomPanel";
+import { ConflictDialog } from "./components/ConflictDialog";
 import { FilePane } from "./components/FilePane";
 import { HostList } from "./components/HostList";
-import { LogPanel } from "./components/LogPanel";
 import { RemotePane } from "./components/RemotePane";
+import { groupByParent, type DragPayload, type Side } from "./dnd";
 import { usePersistentState } from "./settings";
 import { useActivityLog } from "./useActivityLog";
 import { usePane } from "./usePane";
+import { useTransfers } from "./useTransfers";
 import "./App.css";
 
 type Connection =
@@ -27,7 +34,7 @@ type Connection =
   | { state: "connected"; alias: string; result: ConnectResult }
   | { state: "failed"; alias: string; error: string };
 
-type Side = "local" | "remote";
+const notConnected = () => Promise.reject(new Error("non connesso"));
 
 export default function App() {
   const [hosts, setHosts] = useState<HostEntry[]>([]);
@@ -36,16 +43,40 @@ export default function App() {
   const [prompts, setPrompts] = useState<AskpassRequest[]>([]);
   const [home, setHome] = useState<string | null>(null);
   const [activeSide, setActiveSide] = useState<Side>("local");
-  const localPane = usePane(localListDir, home);
-  const [logOpen, setLogOpen] = usePersistentState("log.open", true);
-  const [logHeight, setLogHeight] = usePersistentState("log.height", 200);
+  const [panelOpen, setPanelOpen] = usePersistentState("log.open", true);
+  const [panelHeight, setPanelHeight] = usePersistentState("log.height", 200);
+  const [panelTab, setPanelTab] = usePersistentState<BottomTab>("panel.tab", "log");
   const [verboseList, setVerboseList] = usePersistentState<string[]>("hosts.verbose", []);
   const verboseHosts = new Set(verboseList);
-  const log = useActivityLog(logOpen);
+  const log = useActivityLog(panelOpen && panelTab === "log");
 
-  const toggleLog = () => {
-    if (!logOpen) log.markSeen();
-    setLogOpen(!logOpen);
+  const session = connection.state === "connected" ? connection.result : null;
+  const remoteList = useCallback(
+    (path: string) => (session ? listDir(session.sessionId, path) : notConnected()),
+    [session],
+  );
+  const localPane = usePane(localListDir, home);
+  const remotePane = usePane(remoteList, session?.home ?? null);
+
+  // Refresh the destination pane when a transfer into its directory ends.
+  const panesRef = useRef({ localPane, remotePane });
+  panesRef.current = { localPane, remotePane };
+  const transfers = useTransfers((job: JobInfo) => {
+    const pane = job.direction === "download" ? panesRef.current.localPane : panesRef.current.remotePane;
+    if (pane.path !== null && (job.dstDir === pane.path || job.dstDir.startsWith(`${pane.path.replace(/\/$/, "")}/`)))
+      void pane.refresh();
+  });
+
+  const startTransfer = (direction: Direction, srcDir: string, names: string[], dstDir: string) => {
+    if (!session || names.length === 0) return;
+    void transfers.start(session.sessionId, direction, srcDir, names, dstDir);
+    setPanelTab("transfers");
+    if (!panelOpen) setPanelOpen(true);
+  };
+
+  const togglePanel = () => {
+    if (!panelOpen) log.markSeen();
+    setPanelOpen(!panelOpen);
   };
 
   const toggleVerbose = (alias: string) =>
@@ -55,7 +86,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        toggleLog();
+        togglePanel();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -68,7 +99,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unlisten = onAskpassRequest((request) => setPrompts((queue) => [...queue, request]));
+    const unlisten = onAskpassRequest((request) =>
+      setPrompts((queue) => (queue.some((p) => p.id === request.id) ? queue : [...queue, request])),
+    );
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Files dropped from the Finder onto the remote pane are uploaded.
+  const finderDropRef = useRef<(paths: string[], x: number, y: number) => void>(() => {});
+  finderDropRef.current = (paths, x, y) => {
+    const target = document.elementFromPoint(x, y)?.closest("[data-pane]");
+    if (target?.getAttribute("data-pane") !== "remote" || remotePane.path === null) return;
+    for (const [dir, names] of groupByParent(paths)) startTransfer("upload", dir, names, remotePane.path);
+  };
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type !== "drop") return;
+      const ratio = window.devicePixelRatio || 1;
+      const { x, y } = event.payload.position;
+      finderDropRef.current(event.payload.paths, x / ratio, y / ratio);
+    });
     return () => {
       void unlisten.then((fn) => fn());
     };
@@ -99,6 +151,9 @@ export default function App() {
     setActiveSide("local");
   };
 
+  const onDrop = (payload: DragPayload, targetDir: string) =>
+    startTransfer(payload.side === "local" ? "upload" : "download", payload.dir, payload.names, targetDir);
+
   const activeAlias = connection.state === "idle" ? null : connection.alias;
 
   return (
@@ -116,18 +171,39 @@ export default function App() {
         <div className="panes">
           <FilePane
             pane={localPane}
+            side="local"
             title="Locale"
             active={activeSide === "local"}
             onActivate={() => setActiveSide("local")}
+            transfer={
+              session && remotePane.path !== null && localPane.path !== null
+                ? {
+                    label: "Carica →",
+                    title: `Carica su ${connection.state === "connected" ? connection.alias : ""}:${remotePane.path}`,
+                    run: (names) => startTransfer("upload", localPane.path!, names, remotePane.path!),
+                  }
+                : undefined
+            }
+            onDropFiles={session ? onDrop : undefined}
           />
           {connection.state === "connected" ? (
             <RemotePane
-              key={connection.result.sessionId}
               alias={connection.alias}
               connection={connection.result}
+              pane={remotePane}
               active={activeSide === "remote"}
               onActivate={() => setActiveSide("remote")}
               onDisconnect={() => void handleDisconnect()}
+              transfer={
+                remotePane.path !== null && localPane.path !== null
+                  ? {
+                      label: "← Scarica",
+                      title: `Scarica in ${localPane.path}`,
+                      run: (names) => startTransfer("download", remotePane.path!, names, localPane.path!),
+                    }
+                  : undefined
+              }
+              onDropFiles={onDrop}
             />
           ) : (
             <section className="pane placeholder">
@@ -142,9 +218,24 @@ export default function App() {
             </section>
           )}
         </div>
-        <LogPanel log={log} open={logOpen} onToggle={toggleLog} height={logHeight} onResize={setLogHeight} />
+        <BottomPanel
+          log={log}
+          transfers={transfers}
+          tab={panelTab}
+          onTab={(tab) => {
+            if (tab === "log") log.markSeen();
+            setPanelTab(tab);
+          }}
+          open={panelOpen}
+          onToggle={togglePanel}
+          height={panelHeight}
+          onResize={setPanelHeight}
+        />
       </div>
       {prompts[0] && <AskpassDialog request={prompts[0]} onAnswer={answerPrompt} />}
+      {!prompts[0] && transfers.conflicts[0] && (
+        <ConflictDialog key={transfers.conflicts[0].id} request={transfers.conflicts[0]} onAnswer={transfers.answerConflict} />
+      )}
     </main>
   );
 }

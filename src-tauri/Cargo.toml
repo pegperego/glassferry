@@ -31,6 +31,7 @@ dirs = "7.0.0"
 libc = "0.2.191"
 futures-util = "0.3.34"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+bytes = "1.12.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -6,6 +6,7 @@ pub mod log;
 pub mod runtime_dir;
 pub mod session;
 pub mod ssh_config;
+pub mod transfer;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -21,6 +22,7 @@ use entry::FileEntry;
 use log::{LogEntry, Logger};
 use session::{Capabilities, Session, SshLauncher};
 use ssh_config::HostEntry;
+use transfer::{ConflictAction, Direction, JobInfo, TransferEvent, TransferManager};
 
 const DEFAULT_SSH_BIN: &str = "/usr/bin/ssh";
 
@@ -29,6 +31,7 @@ struct AppState {
     runtime_dir: PathBuf,
     askpass: Arc<AskpassServer>,
     logger: Arc<Logger>,
+    transfers: Arc<TransferManager>,
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<u64, Arc<Session>>>,
 }
@@ -102,6 +105,7 @@ async fn local_list_dir(state: State<'_, AppState>, path: String) -> Result<Vec<
 
 #[tauri::command]
 async fn disconnect(state: State<'_, AppState>, session_id: u64) -> Result<()> {
+    state.transfers.cancel_session(session_id);
     let session = state.sessions.lock().unwrap().remove(&session_id);
     if let Some(session) = session {
         match Arc::try_unwrap(session) {
@@ -145,6 +149,41 @@ fn log_open_dir(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<()>
         .map_err(|e| AppError::Other(e.to_string()))
 }
 
+#[tauri::command]
+fn transfer_start(
+    state: State<'_, AppState>,
+    session_id: u64,
+    direction: Direction,
+    src_dir: String,
+    names: Vec<String>,
+    dst_dir: String,
+) -> Result<u64> {
+    let session = state.session(session_id)?;
+    Ok(state
+        .transfers
+        .start(session_id, session, direction, src_dir, names, dst_dir))
+}
+
+#[tauri::command]
+fn transfer_cancel(state: State<'_, AppState>, job_id: u64) {
+    state.transfers.cancel(job_id);
+}
+
+#[tauri::command]
+fn transfer_list(state: State<'_, AppState>) -> Vec<JobInfo> {
+    state.transfers.list()
+}
+
+#[tauri::command]
+fn transfer_clear_finished(state: State<'_, AppState>) {
+    state.transfers.clear_finished();
+}
+
+#[tauri::command]
+fn transfer_conflict_respond(state: State<'_, AppState>, id: u64, action: ConflictAction, apply_to_all: bool) {
+    state.transfers.respond_conflict(id, action, apply_to_all);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(code) = askpass::run_helper_if_requested() {
@@ -163,6 +202,16 @@ pub fn run() {
                 Logger::default_dir(),
             );
             let handle = app.handle().clone();
+            let transfers = TransferManager::new(
+                logger.clone(),
+                Arc::new(move |event| {
+                    let _ = match event {
+                        TransferEvent::Updates(jobs) => handle.emit("transfer-update", jobs),
+                        TransferEvent::Conflict(request) => handle.emit("transfer-conflict", request),
+                    };
+                }),
+            );
+            let handle = app.handle().clone();
             let askpass = AskpassServer::start(
                 &runtime_dir,
                 Arc::new(move |request| {
@@ -175,6 +224,7 @@ pub fn run() {
                 runtime_dir,
                 askpass,
                 logger,
+                transfers,
                 next_session_id: AtomicU64::new(1),
                 sessions: Mutex::new(HashMap::new()),
             });
@@ -192,7 +242,12 @@ pub fn run() {
             log_snapshot,
             log_clear,
             log_set_capacity,
-            log_open_dir
+            log_open_dir,
+            transfer_start,
+            transfer_cancel,
+            transfer_list,
+            transfer_clear_finished,
+            transfer_conflict_respond
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

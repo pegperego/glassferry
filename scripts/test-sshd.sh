@@ -8,6 +8,7 @@
 #   sfm-local      key with passphrase "segreta", host key prompt on first use
 #   sfm-sftponly   ForceCommand internal-sftp (no shell)
 #   sfm-rc         RemoteCommand + RequestTTY force in the client config
+#   sfm-slow       like sfm-local, through a relay adding 20 ms each way
 #
 # Example: cargo run --example spike -- "$PWD/.dev-sshd/ssh" sfm-local segreta
 
@@ -73,6 +74,7 @@ start() {
     write_host sfm-sftponly 2223 ""
     write_host sfm-rc 2222 "  RemoteCommand echo hello
   RequestTTY force"
+    write_host sfm-slow 2222 "  ProxyCommand python3 $ROOT/scripts/delay-relay.py 127.0.0.1 2222 20"
 
     printf '#!/bin/sh\nexec /usr/bin/ssh -F "%s/ssh_config" "$@"\n' "$DIR" > "$DIR/ssh"
     chmod +x "$DIR/ssh"

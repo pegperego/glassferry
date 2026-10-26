@@ -694,3 +694,160 @@ button.inline {
     display: none;
   }
 }
+
+/* Bottom panel tabs */
+
+.log-header .tab {
+  border: none;
+  background: none;
+  padding: 2px 8px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.log-header .tab.active {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.active-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Transfers */
+
+.transfer-button {
+  white-space: nowrap;
+}
+
+.transfers {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.transfers-empty {
+  padding: 12px;
+}
+
+.transfer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.transfer-dir {
+  font-size: 16px;
+  width: 16px;
+  text-align: center;
+  color: var(--accent);
+}
+
+.transfer-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.transfer-title {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.transfer-title .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress {
+  height: 4px;
+  margin: 4px 0;
+  border-radius: 2px;
+  background: var(--bg-alt);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+
+.transfer.done .progress-bar {
+  background: var(--ok);
+}
+
+.transfer.failed .progress-bar,
+.transfer.cancelled .progress-bar {
+  background: var(--danger);
+}
+
+.transfer.waitingConflict .progress-bar {
+  background: #d99a00;
+}
+
+.transfer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  align-items: center;
+}
+
+.transfer-current {
+  font-family: ui-monospace, Menlo, monospace;
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-errors {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--danger);
+  font-size: 11px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+/* Drag & drop */
+
+.file-list.drop-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.file-row.drop-target {
+  background: var(--accent) !important;
+  color: var(--accent-fg);
+}
+
+/* Conflict dialog */
+
+.conflict-table {
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.conflict-table th {
+  text-align: left;
+  font-weight: 500;
+  padding-right: 16px;
+  color: var(--muted);
+}
+
+.conflict-table td {
+  padding-right: 16px;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}

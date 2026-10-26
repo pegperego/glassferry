@@ -14,6 +14,7 @@ use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
+use crate::entry::{EntryKind, FileEntry};
 use crate::error::{AppError, Result};
 
 const CONTROL_PERSIST: &str = "ControlPersist=15m";
@@ -192,28 +193,6 @@ pub async fn probe(launcher: &SshLauncher) -> Capabilities {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum EntryKind {
-    Dir,
-    File,
-    Symlink,
-    Other,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteEntry {
-    pub name: String,
-    pub kind: EntryKind,
-    /// For symlinks: whether the target is a directory.
-    pub target_is_dir: bool,
-    pub size: Option<u64>,
-    /// Seconds since the Unix epoch.
-    pub modified: Option<u64>,
-    pub permissions: Option<u32>,
-}
-
 pub struct Session {
     pub launcher: SshLauncher,
     pub sftp: Sftp,
@@ -270,7 +249,7 @@ impl Session {
         })
     }
 
-    pub async fn list_dir(&self, path: &Path) -> Result<Vec<RemoteEntry>> {
+    pub async fn list_dir(&self, path: &Path) -> Result<Vec<FileEntry>> {
         let mut fs = self.sftp.fs();
         let dir = fs.open_dir(path).await?;
         let raw: Vec<_> = dir.read_dir().try_collect().await?;
@@ -298,7 +277,7 @@ impl Session {
             } else {
                 false
             };
-            entries.push(RemoteEntry {
+            entries.push(FileEntry {
                 name,
                 kind,
                 target_is_dir,

@@ -1,5 +1,7 @@
 pub mod askpass;
+pub mod entry;
 pub mod error;
+pub mod local;
 pub mod runtime_dir;
 pub mod session;
 pub mod ssh_config;
@@ -14,7 +16,8 @@ use tauri::{Emitter, Manager, State};
 
 use askpass::AskpassServer;
 use error::{AppError, Result};
-use session::{Capabilities, RemoteEntry, Session, SshLauncher};
+use entry::FileEntry;
+use session::{Capabilities, Session, SshLauncher};
 use ssh_config::HostEntry;
 
 const DEFAULT_SSH_BIN: &str = "/usr/bin/ssh";
@@ -78,8 +81,18 @@ async fn connect(state: State<'_, AppState>, alias: String) -> Result<ConnectRes
 }
 
 #[tauri::command]
-async fn list_dir(state: State<'_, AppState>, session_id: u64, path: String) -> Result<Vec<RemoteEntry>> {
+async fn list_dir(state: State<'_, AppState>, session_id: u64, path: String) -> Result<Vec<FileEntry>> {
     state.session(session_id)?.list_dir(path.as_ref()).await
+}
+
+#[tauri::command]
+fn local_home() -> Result<String> {
+    Ok(local::home()?.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn local_list_dir(path: String) -> Result<Vec<FileEntry>> {
+    local::list_dir(PathBuf::from(path)).await
 }
 
 #[tauri::command]
@@ -131,6 +144,8 @@ pub fn run() {
             resolve_host,
             connect,
             list_dir,
+            local_home,
+            local_list_dir,
             disconnect,
             askpass_respond
         ])

@@ -22,7 +22,7 @@ export interface ConnectResult {
 
 export type EntryKind = "dir" | "file" | "symlink" | "other";
 
-export interface RemoteEntry {
+export interface FileEntry {
   name: string;
   kind: EntryKind;
   targetIsDir: boolean;
@@ -49,7 +49,11 @@ export const resolveHost = (alias: string) =>
 export const connect = (alias: string) => invoke<ConnectResult>("connect", { alias });
 
 export const listDir = (sessionId: number, path: string) =>
-  invoke<RemoteEntry[]>("list_dir", { sessionId, path });
+  invoke<FileEntry[]>("list_dir", { sessionId, path });
+
+export const localHome = () => invoke<string>("local_home");
+
+export const localListDir = (path: string) => invoke<FileEntry[]>("local_list_dir", { path });
 
 export const disconnect = (sessionId: number) => invoke<void>("disconnect", { sessionId });
 
@@ -60,5 +64,5 @@ export const askpassRespond = (id: number, value: string | null) =>
 export const onAskpassRequest = (handler: (request: AskpassRequest) => void): Promise<UnlistenFn> =>
   listen<AskpassRequest>("askpass-request", (event) => handler(event.payload));
 
-export const isDirLike = (entry: RemoteEntry) =>
+export const isDirLike = (entry: FileEntry) =>
   entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);

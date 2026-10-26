@@ -49,6 +49,8 @@ interface Props {
   transfer?: { label: string; title: string; run: (names: string[]) => void };
   /** Files dragged from the other pane, dropped into `targetDir`. */
   onDropFiles?: (payload: DragPayload, targetDir: string) => void;
+  /** Double click / Enter on a file: edit (remote) or open (local). */
+  openFile?: { label: string; run: (path: string) => void };
 }
 
 type Dialog =
@@ -57,7 +59,7 @@ type Dialog =
   | { kind: "delete"; names: string[] };
 
 export function FilePane(props: Props) {
-  const { pane, title, actions, info, active, onActivate, side, ops, transfer, onDropFiles } = props;
+  const { pane, title, actions, info, active, onActivate, side, ops, transfer, onDropFiles, openFile } = props;
   const { path, visible, selection, sort } = pane;
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -109,7 +111,9 @@ export function FilePane(props: Props) {
   };
 
   const open = (entry: FileEntry) => {
-    if (path !== null && isDirLike(entry)) void pane.navigate(joinPath(path, entry.name));
+    if (path === null) return;
+    if (isDirLike(entry)) void pane.navigate(joinPath(path, entry.name));
+    else if (entry.kind === "file" || entry.kind === "symlink") openFile?.run(joinPath(path, entry.name));
   };
 
   const goUp = () => {
@@ -217,6 +221,8 @@ export function FilePane(props: Props) {
     const chosen = entry ? (selection.selected.has(entry.name) ? selectionOrCursor() : [entry.name]) : [];
     const items: MenuItem[] = [];
     if (entry && isDirLike(entry) && chosen.length === 1) items.push({ label: "Apri", shortcut: "↩", onSelect: () => open(entry) });
+    if (entry && !isDirLike(entry) && openFile && chosen.length === 1)
+      items.push({ label: openFile.label, shortcut: "↩", onSelect: () => open(entry) });
     if (entry && transfer) items.push({ label: transfer.label, shortcut: "F5", onSelect: () => transfer.run(chosen) });
     if (entry) {
       items.push(

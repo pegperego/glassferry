@@ -177,5 +177,45 @@ export const fsMove = (target: Target, srcDir: string, names: string[], dstDir: 
 export const fsDelete = (target: Target, dir: string, names: string[]) =>
   invoke<DeleteMethod>("fs_delete", { target, dir, names });
 
+export type EditState = "synced" | "uploading" | "conflict" | "error";
+
+export interface EditInfo {
+  id: number;
+  sessionId: number;
+  host: string;
+  remotePath: string;
+  localPath: string;
+  state: EditState;
+  uploads: number;
+  lastSyncAt: number;
+  error: string | null;
+}
+
+export interface EditConflict {
+  id: number;
+  host: string;
+  remotePath: string;
+  openedSize: number;
+  openedModified: number | null;
+  currentSize: number;
+  currentModified: number | null;
+}
+
+export type EditChoice = "overwrite" | "reload" | "keep";
+
+export const editOpen = (sessionId: number, path: string) => invoke<EditInfo>("edit_open", { sessionId, path });
+export const editList = () => invoke<EditInfo[]>("edit_list");
+export const editClose = (id: number) => invoke<void>("edit_close", { id });
+export const editResolve = (id: number, choice: EditChoice) => invoke<void>("edit_resolve", { id, choice });
+export const editReopen = (id: number) => invoke<void>("edit_reopen", { id });
+export const editReveal = (id: number) => invoke<void>("edit_reveal", { id });
+export const localOpen = (path: string) => invoke<void>("local_open", { path });
+
+export const onEditUpdate = (handler: (info: EditInfo) => void): Promise<UnlistenFn> =>
+  listen<EditInfo>("edit-update", (event) => handler(event.payload));
+
+export const onEditConflict = (handler: (conflict: EditConflict) => void): Promise<UnlistenFn> =>
+  listen<EditConflict>("edit-conflict", (event) => handler(event.payload));
+
 export const isDirLike = (entry: FileEntry) =>
   entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);

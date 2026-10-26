@@ -38,6 +38,12 @@ UI triggers: button Carica/Scarica and F5 in the active pane, drag & drop betwee
 
 UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
 
+## Editing remote files
+
+`edit.rs` (`EditManager`): `edit_open` downloads into `~/Library/Caches/sshfilemanager/edit/<hash>/<name>` (max 100 MB), opens it with `open`/`xdg-open` and watches the directory with `notify` (editors save atomically). After a 500 ms debounce, a content change (SHA-256) is uploaded by writing the remote file in place (owner/mode preserved). Before uploading, the remote file is compared with the opened version (size, mtime, and SHA-256 via `sha256sum` when the probe found it): on mismatch an `edit-conflict` asks overwrite / reload (local copy kept as "<name> (mia versione)") / keep. Local copies are removed on close, on disconnect, and on exit only when synced. Check: `cargo run --example edit -- "$PWD/../.dev-sshd/ssh" sfm-local segreta <work-dir>`.
+
+UI: double click / Enter on a remote file = edit, on a local file = open with the default app; the bottom panel's "File aperti" tab lists open files.
+
 ## Layout
 
 - `src-tauri/src/lib.rs` — Tauri state, commands, exit cleanup
@@ -74,4 +80,4 @@ scripts/test-sshd.sh stop
 
 ## Out of scope (MVP)
 
-Windows, drag out to Finder, File Provider integration, chmod/chown UI, resume of interrupted transfers, server-side copy between remote directories.
+Windows, drag out to Finder, File Provider integration, choosing the editor app per file type, chmod/chown UI, resume of interrupted transfers, server-side copy between remote directories.

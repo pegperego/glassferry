@@ -14,16 +14,19 @@ import {
 import type { ActivityLog } from "../useActivityLog";
 import type { Transfers } from "../useTransfers";
 import { TransfersView } from "./TransfersView";
+import type { Edits } from "../useEdits";
+import { EditsView } from "./EditsView";
 
 const ROW_HEIGHT = 22;
 const CHANNELS: LogChannel[] = ["ssh", "sftp", "exec", "askpass", "local"];
 const MIN_HEIGHT = 90;
 
-export type BottomTab = "log" | "transfers";
+export type BottomTab = "log" | "transfers" | "edits";
 
 interface Props {
   log: ActivityLog;
   transfers: Transfers;
+  edits: Edits;
   tab: BottomTab;
   onTab: (tab: BottomTab) => void;
   open: boolean;
@@ -33,7 +36,7 @@ interface Props {
 }
 
 /** Bottom panel with the activity log and the transfer queue. */
-export function BottomPanel({ log, transfers, tab, onTab, open, onToggle, height, onResize }: Props) {
+export function BottomPanel({ log, transfers, edits, tab, onTab, open, onToggle, height, onResize }: Props) {
   const [filter, setFilter] = useState<LogFilter>(emptyFilter);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -87,6 +90,15 @@ export function BottomPanel({ log, transfers, tab, onTab, open, onToggle, height
         >
           Trasferimenti
           {transfers.activeCount > 0 && <span className="badge active-badge">{transfers.activeCount}</span>}
+        </button>
+        <button
+          className={tab === "edits" ? "tab active" : "tab"}
+          onClick={() => (open ? onTab("edits") : (onTab("edits"), onToggle()))}
+        >
+          File aperti
+          {edits.edits.length > 0 && (
+            <span className={edits.unsyncedCount > 0 ? "badge error-badge" : "badge active-badge"}>{edits.edits.length}</span>
+          )}
         </button>
         {open && tab === "transfers" && (
           <>
@@ -155,6 +167,7 @@ export function BottomPanel({ log, transfers, tab, onTab, open, onToggle, height
         )}
       </header>
       {open && tab === "transfers" && <TransfersView transfers={transfers} />}
+      {open && tab === "edits" && <EditsView edits={edits} />}
       {open && tab === "log" && (
         <div className={selected ? "log-body with-details" : "log-body"}>
           <LogList entries={visible} selectedId={selectedId} onSelect={setSelectedId} />

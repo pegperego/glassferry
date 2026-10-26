@@ -1,4 +1,5 @@
 pub mod askpass;
+pub mod edit;
 pub mod entry;
 pub mod error;
 pub mod fileops;
@@ -22,6 +23,7 @@ use error::{AppError, Result};
 use entry::FileEntry;
 use log::{LogEntry, Logger};
 use session::{Capabilities, Session, SshLauncher};
+use edit::{ConflictChoice, EditEvent, EditInfo, EditManager};
 use fileops::{DeleteMethod, Target};
 use ssh_config::HostEntry;
 use transfer::{ConflictAction, Direction, JobInfo, TransferEvent, TransferManager};
@@ -34,6 +36,7 @@ struct AppState {
     askpass: Arc<AskpassServer>,
     logger: Arc<Logger>,
     transfers: Arc<TransferManager>,
+    edits: Arc<EditManager>,
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<u64, Arc<Session>>>,
 }
@@ -108,6 +111,7 @@ async fn local_list_dir(state: State<'_, AppState>, path: String) -> Result<Vec<
 #[tauri::command]
 async fn disconnect(state: State<'_, AppState>, session_id: u64) -> Result<()> {
     state.transfers.cancel_session(session_id);
+    state.edits.close_session(session_id);
     let session = state.sessions.lock().unwrap().remove(&session_id);
     if let Some(session) = session {
         match Arc::try_unwrap(session) {
@@ -228,6 +232,53 @@ async fn fs_delete(state: State<'_, AppState>, target: Target, dir: String, name
     }
 }
 
+#[tauri::command]
+async fn edit_open(state: State<'_, AppState>, session_id: u64, path: String) -> Result<EditInfo> {
+    let session = state.session(session_id)?;
+    state.edits.open(session_id, session, path).await
+}
+
+#[tauri::command]
+fn edit_list(state: State<'_, AppState>) -> Vec<EditInfo> {
+    state.edits.list()
+}
+
+#[tauri::command]
+fn edit_close(state: State<'_, AppState>, id: u64) {
+    state.edits.close(id);
+}
+
+#[tauri::command]
+fn edit_resolve(state: State<'_, AppState>, id: u64, choice: ConflictChoice) -> Result<()> {
+    state.edits.resolve(id, choice)
+}
+
+#[tauri::command]
+fn edit_reopen(state: State<'_, AppState>, id: u64) -> Result<()> {
+    state.edits.reopen(id)
+}
+
+#[tauri::command]
+fn edit_reveal(app: tauri::AppHandle, state: State<'_, AppState>, id: u64) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(state.edits.local_path(id)?)
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Opens a local file with its default application (double click).
+#[tauri::command]
+fn local_open(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let op = state.logger.start(None, log::Channel::Local, "open", &path);
+    op.result(
+        app.opener()
+            .open_path(&path, None::<&str>)
+            .map_err(|e| AppError::Other(e.to_string())),
+        |_| None,
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(code) = askpass::run_helper_if_requested() {
@@ -256,6 +307,17 @@ pub fn run() {
                 }),
             );
             let handle = app.handle().clone();
+            let edit_root = EditManager::default_root().unwrap_or_else(|| runtime_dir.join("edit"));
+            let edits = EditManager::new(
+                edit_root,
+                Arc::new(move |event| {
+                    let _ = match event {
+                        EditEvent::Update(info) => handle.emit("edit-update", info),
+                        EditEvent::Conflict(conflict) => handle.emit("edit-conflict", conflict),
+                    };
+                }),
+            );
+            let handle = app.handle().clone();
             let askpass = AskpassServer::start(
                 &runtime_dir,
                 Arc::new(move |request| {
@@ -269,6 +331,7 @@ pub fn run() {
                 askpass,
                 logger,
                 transfers,
+                edits,
                 next_session_id: AtomicU64::new(1),
                 sessions: Mutex::new(HashMap::new()),
             });
@@ -295,7 +358,14 @@ pub fn run() {
             fs_mkdir,
             fs_rename,
             fs_move,
-            fs_delete
+            fs_delete,
+            edit_open,
+            edit_list,
+            edit_close,
+            edit_resolve,
+            edit_reopen,
+            edit_reveal,
+            local_open
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -303,6 +373,7 @@ pub fn run() {
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
             let state = handle.state::<AppState>();
+            state.edits.close_all_synced();
             for session in state.sessions.lock().unwrap().values() {
                 session.launcher.stop_master_blocking();
             }

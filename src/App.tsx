@@ -12,6 +12,7 @@ import {
   listHosts,
   localHome,
   localListDir,
+  localOpen,
   onAskpassRequest,
   type AskpassRequest,
   type ConnectResult,
@@ -23,12 +24,14 @@ import {
 import { AskpassDialog } from "./components/AskpassDialog";
 import { BottomPanel, type BottomTab } from "./components/BottomPanel";
 import { ConflictDialog } from "./components/ConflictDialog";
+import { EditConflictDialog } from "./components/EditConflictDialog";
 import { FilePane, type PaneOps } from "./components/FilePane";
 import { HostList } from "./components/HostList";
 import { RemotePane } from "./components/RemotePane";
 import { groupByParent, type DragPayload, type Side } from "./dnd";
 import { usePersistentState } from "./settings";
 import { useActivityLog } from "./useActivityLog";
+import { useEdits } from "./useEdits";
 import { usePane } from "./usePane";
 import { useTransfers } from "./useTransfers";
 import "./App.css";
@@ -94,6 +97,9 @@ export default function App() {
           : "L'eliminazione sul server è definitiva e include tutto il contenuto delle cartelle (visita ricorsiva via SFTP).",
       )
     : null;
+
+  const [appError, setAppError] = useState<string | null>(null);
+  const edits = useEdits((message) => setAppError(message));
 
   const startTransfer = (direction: Direction, srcDir: string, names: string[], dstDir: string) => {
     if (!session || names.length === 0) return;
@@ -162,7 +168,10 @@ export default function App() {
   };
 
   const handleConnect = async (alias: string) => {
-    if (connection.state === "connected") await disconnect(connection.result.sessionId);
+    if (connection.state === "connected") {
+      await disconnect(connection.result.sessionId);
+      edits.dropSession(connection.result.sessionId);
+    }
     setConnection({ state: "connecting", alias });
     try {
       const result = await connect(alias, verboseHosts.has(alias));
@@ -174,7 +183,10 @@ export default function App() {
   };
 
   const handleDisconnect = async () => {
-    if (connection.state === "connected") await disconnect(connection.result.sessionId);
+    if (connection.state === "connected") {
+      await disconnect(connection.result.sessionId);
+      edits.dropSession(connection.result.sessionId);
+    }
     setConnection({ state: "idle" });
     setActiveSide("local");
   };
@@ -214,6 +226,7 @@ export default function App() {
                 : undefined
             }
             onDropFiles={session ? onDrop : undefined}
+            openFile={{ label: "Apri con l'app predefinita", run: (path) => void localOpen(path).catch((e) => setAppError(String(e))) }}
           />
           {connection.state === "connected" && remoteOps ? (
             <RemotePane
@@ -234,6 +247,14 @@ export default function App() {
                   : undefined
               }
               onDropFiles={onDrop}
+              openFile={{
+                label: "Modifica",
+                run: (path) => {
+                  void edits.open(connection.result.sessionId, path);
+                  setPanelTab("edits");
+                  if (!panelOpen) setPanelOpen(true);
+                },
+              }}
             />
           ) : (
             <section className="pane placeholder">
@@ -251,6 +272,7 @@ export default function App() {
         <BottomPanel
           log={log}
           transfers={transfers}
+          edits={edits}
           tab={panelTab}
           onTab={(tab) => {
             if (tab === "log") log.markSeen();
@@ -263,7 +285,22 @@ export default function App() {
         />
       </div>
       {prompts[0] && <AskpassDialog request={prompts[0]} onAnswer={answerPrompt} />}
-      {!prompts[0] && transfers.conflicts[0] && (
+      {appError && (
+        <div className="toast error-toast" role="alert">
+          {appError}
+          <button className="inline" onClick={() => setAppError(null)}>
+            ✕
+          </button>
+        </div>
+      )}
+      {!prompts[0] && edits.conflicts[0] && (
+        <EditConflictDialog
+          key={edits.conflicts[0].id}
+          conflict={edits.conflicts[0]}
+          onAnswer={(choice) => edits.resolve(edits.conflicts[0].id, choice)}
+        />
+      )}
+      {!prompts[0] && !edits.conflicts[0] && transfers.conflicts[0] && (
         <ConflictDialog key={transfers.conflicts[0].id} request={transfers.conflicts[0]} onAnswer={transfers.answerConflict} />
       )}
     </main>

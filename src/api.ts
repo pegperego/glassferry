@@ -162,5 +162,20 @@ export const onTransferConflict = (handler: (request: ConflictRequest) => void):
 export const isFinished = (job: JobInfo) =>
   job.state === "done" || job.state === "failed" || job.state === "cancelled";
 
+/** Side an operation applies to. */
+export type Target = { kind: "local" } | { kind: "remote"; sessionId: number };
+export type DeleteMethod = "trash" | "shell" | "sftp";
+
+export const fsMkdir = (target: Target, dir: string, name: string) => invoke<void>("fs_mkdir", { target, dir, name });
+
+export const fsRename = (target: Target, dir: string, from: string, to: string) =>
+  invoke<void>("fs_rename", { target, dir, from, to });
+
+export const fsMove = (target: Target, srcDir: string, names: string[], dstDir: string) =>
+  invoke<void>("fs_move", { target, srcDir, names, dstDir });
+
+export const fsDelete = (target: Target, dir: string, names: string[]) =>
+  invoke<DeleteMethod>("fs_delete", { target, dir, names });
+
 export const isDirLike = (entry: FileEntry) =>
   entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);

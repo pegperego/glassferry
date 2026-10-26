@@ -4,6 +4,10 @@ import {
   askpassRespond,
   connect,
   disconnect,
+  fsDelete,
+  fsMkdir,
+  fsMove,
+  fsRename,
   listDir,
   listHosts,
   localHome,
@@ -14,11 +18,12 @@ import {
   type Direction,
   type HostEntry,
   type JobInfo,
+  type Target,
 } from "./api";
 import { AskpassDialog } from "./components/AskpassDialog";
 import { BottomPanel, type BottomTab } from "./components/BottomPanel";
 import { ConflictDialog } from "./components/ConflictDialog";
-import { FilePane } from "./components/FilePane";
+import { FilePane, type PaneOps } from "./components/FilePane";
 import { HostList } from "./components/HostList";
 import { RemotePane } from "./components/RemotePane";
 import { groupByParent, type DragPayload, type Side } from "./dnd";
@@ -35,6 +40,19 @@ type Connection =
   | { state: "failed"; alias: string; error: string };
 
 const notConnected = () => Promise.reject(new Error("non connesso"));
+
+function paneOps(target: Target, permanentDelete: boolean, deleteHint: string): PaneOps {
+  return {
+    mkdir: (dir, name) => fsMkdir(target, dir, name),
+    rename: (dir, from, to) => fsRename(target, dir, from, to),
+    move: (srcDir, names, dstDir) => fsMove(target, srcDir, names, dstDir),
+    remove: (dir, names) => fsDelete(target, dir, names),
+    permanentDelete,
+    deleteHint,
+  };
+}
+
+const localOps = paneOps({ kind: "local" }, false, "Potrai recuperarli dal Cestino.");
 
 export default function App() {
   const [hosts, setHosts] = useState<HostEntry[]>([]);
@@ -66,6 +84,16 @@ export default function App() {
     if (pane.path !== null && (job.dstDir === pane.path || job.dstDir.startsWith(`${pane.path.replace(/\/$/, "")}/`)))
       void pane.refresh();
   });
+
+  const remoteOps = session
+    ? paneOps(
+        { kind: "remote", sessionId: session.sessionId },
+        true,
+        session.capabilities.commands.includes("rm")
+          ? "L'eliminazione sul server è definitiva (rm -rf) e include tutto il contenuto delle cartelle."
+          : "L'eliminazione sul server è definitiva e include tutto il contenuto delle cartelle (visita ricorsiva via SFTP).",
+      )
+    : null;
 
   const startTransfer = (direction: Direction, srcDir: string, names: string[], dstDir: string) => {
     if (!session || names.length === 0) return;
@@ -172,6 +200,7 @@ export default function App() {
           <FilePane
             pane={localPane}
             side="local"
+            ops={localOps}
             title="Locale"
             active={activeSide === "local"}
             onActivate={() => setActiveSide("local")}
@@ -186,8 +215,9 @@ export default function App() {
             }
             onDropFiles={session ? onDrop : undefined}
           />
-          {connection.state === "connected" ? (
+          {connection.state === "connected" && remoteOps ? (
             <RemotePane
+              ops={remoteOps}
               alias={connection.alias}
               connection={connection.result}
               pane={remotePane}

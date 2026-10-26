@@ -19,7 +19,8 @@ export interface PaneState {
   setSelection: (selection: Selection) => void;
   /** Loads `path`; `focus` is the entry to put the cursor on (e.g. the dir we came from). */
   navigate: (path: string, focus?: string) => Promise<void>;
-  refresh: () => Promise<void>;
+  /** Reloads the current directory; `focus` selects that entry afterwards. */
+  refresh: (focus?: string) => Promise<void>;
 }
 
 export function usePane(list: Lister, initialPath: string | null): PaneState {
@@ -63,12 +64,19 @@ export function usePane(list: Lister, initialPath: string | null): PaneState {
     [load],
   );
 
-  const refresh = useCallback(async () => {
-    if (path === null) return;
-    await load(path, (result) =>
-      setSelection((current) => pruneSelection(current, result.map((e) => e.name))),
-    );
-  }, [load, path]);
+  const refresh = useCallback(
+    async (focus?: string) => {
+      if (path === null) return;
+      await load(path, (result) =>
+        setSelection((current) =>
+          focus && result.some((e) => e.name === focus)
+            ? { selected: new Set([focus]), cursor: focus, anchor: focus }
+            : pruneSelection(current, result.map((e) => e.name)),
+        ),
+      );
+    },
+    [load, path],
+  );
 
   // A new lister (e.g. another session) starts from a clean state.
   useEffect(() => {

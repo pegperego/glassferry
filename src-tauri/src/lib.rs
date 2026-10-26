@@ -1,6 +1,7 @@
 pub mod askpass;
 pub mod entry;
 pub mod error;
+pub mod fileops;
 pub mod local;
 pub mod log;
 pub mod runtime_dir;
@@ -21,6 +22,7 @@ use error::{AppError, Result};
 use entry::FileEntry;
 use log::{LogEntry, Logger};
 use session::{Capabilities, Session, SshLauncher};
+use fileops::{DeleteMethod, Target};
 use ssh_config::HostEntry;
 use transfer::{ConflictAction, Direction, JobInfo, TransferEvent, TransferManager};
 
@@ -184,6 +186,48 @@ fn transfer_conflict_respond(state: State<'_, AppState>, id: u64, action: Confli
     state.transfers.respond_conflict(id, action, apply_to_all);
 }
 
+#[tauri::command]
+async fn fs_mkdir(state: State<'_, AppState>, target: Target, dir: String, name: String) -> Result<()> {
+    match target {
+        Target::Local => fileops::local::mkdir(&state.logger, &dir, &name).await,
+        Target::Remote { session_id } => fileops::remote::mkdir(&*state.session(session_id)?, &dir, &name).await,
+    }
+}
+
+#[tauri::command]
+async fn fs_rename(state: State<'_, AppState>, target: Target, dir: String, from: String, to: String) -> Result<()> {
+    match target {
+        Target::Local => fileops::local::rename(&state.logger, &dir, &from, &to).await,
+        Target::Remote { session_id } => {
+            fileops::remote::rename(&*state.session(session_id)?, &dir, &from, &to).await
+        }
+    }
+}
+
+#[tauri::command]
+async fn fs_move(
+    state: State<'_, AppState>,
+    target: Target,
+    src_dir: String,
+    names: Vec<String>,
+    dst_dir: String,
+) -> Result<()> {
+    match target {
+        Target::Local => fileops::local::move_to(&state.logger, &src_dir, &names, &dst_dir).await,
+        Target::Remote { session_id } => {
+            fileops::remote::move_to(&*state.session(session_id)?, &src_dir, &names, &dst_dir).await
+        }
+    }
+}
+
+#[tauri::command]
+async fn fs_delete(state: State<'_, AppState>, target: Target, dir: String, names: Vec<String>) -> Result<DeleteMethod> {
+    match target {
+        Target::Local => fileops::local::delete(&state.logger, &dir, &names).await,
+        Target::Remote { session_id } => fileops::remote::delete(&*state.session(session_id)?, &dir, &names).await,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(code) = askpass::run_helper_if_requested() {
@@ -247,7 +291,11 @@ pub fn run() {
             transfer_cancel,
             transfer_list,
             transfer_clear_finished,
-            transfer_conflict_respond
+            transfer_conflict_respond,
+            fs_mkdir,
+            fs_rename,
+            fs_move,
+            fs_delete
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

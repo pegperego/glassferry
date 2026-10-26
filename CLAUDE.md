@@ -32,6 +32,12 @@ Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run 
 
 UI triggers: button Carica/Scarica and F5 in the active pane, drag & drop between panes (onto a folder row = into that folder), files dropped from the Finder on the remote pane (Tauri `onDragDropEvent`). The bottom panel has two tabs, Log and Trasferimenti.
 
+## File operations
+
+`fileops.rs`, commands `fs_mkdir`/`fs_rename`/`fs_move`/`fs_delete` with a `Target` (`{kind:"local"}` or `{kind:"remote", sessionId}`). Names are validated (`validate_name`: no `/`, `.`, `..`, empty). Rename and move never overwrite (destination checked first). Local delete = Trash (`trash` crate, NSFileManager method: no Finder permission prompt). Remote delete is permanent: `rm -rf -- "$@"` via `sh_command` when the probe found `rm`, recursive SFTP walk otherwise (symlinks removed, never followed); `/` and the home dir are refused. Remote move falls back to `mv` when SFTP rename fails (e.g. across filesystems). Check against the fixture: `cargo run --example fileops -- "$PWD/../.dev-sshd/ssh" sfm-local segreta <work-dir>` (and `sfm-sftponly`).
+
+UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
+
 ## Layout
 
 - `src-tauri/src/lib.rs` — Tauri state, commands, exit cleanup

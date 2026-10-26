@@ -851,3 +851,111 @@ button.inline {
   gap: 6px;
   margin-top: 8px;
 }
+
+/* Context menu */
+
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+  outline: none;
+}
+
+.context-menu button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.context-menu button:hover:not(:disabled),
+.context-menu button:focus-visible {
+  background: var(--accent);
+  color: var(--accent-fg);
+  outline: none;
+}
+
+.context-menu button:disabled {
+  opacity: 0.4;
+}
+
+.context-menu button.danger:not(:hover) {
+  color: var(--danger);
+}
+
+.context-menu kbd {
+  font-family: inherit;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.context-menu hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 2px;
+}
+
+/* File operations */
+
+.rename-input {
+  width: calc(100% - 24px);
+  font: inherit;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.op-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.confirm-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow: auto;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+
+button.primary.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}

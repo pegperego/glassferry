@@ -1,9 +1,17 @@
-// Drag & drop of file selections between the two panes.
+// Drag & drop of file selections between panes.
 //
-// The source side is encoded in the MIME type because `dragover` handlers
+// The source pane is encoded in the MIME type because `dragover` handlers
 // can read the types but not the data.
 
-export type Side = "local" | "remote";
+/** The local pane and the two remote slots. */
+export type Side = "local" | "r0" | "r1";
+
+export const SIDES: Side[] = ["local", "r0", "r1"];
+
+export const remoteSide = (slot: number): Side => (slot === 0 ? "r0" : "r1");
+
+/** Remote slot of a side, or null for the local pane. */
+export const slotOf = (side: Side): number | null => (side === "local" ? null : side === "r0" ? 0 : 1);
 
 export interface DragPayload {
   side: Side;
@@ -21,9 +29,7 @@ export function setDragPayload(dataTransfer: DataTransfer, payload: DragPayload)
 
 /** Side of an in-app drag, or null for anything else. */
 export function dragSourceSide(dataTransfer: DataTransfer): Side | null {
-  if (dataTransfer.types.includes(mimeFor("local"))) return "local";
-  if (dataTransfer.types.includes(mimeFor("remote"))) return "remote";
-  return null;
+  return SIDES.find((side) => dataTransfer.types.includes(mimeFor(side))) ?? null;
 }
 
 export function getDragPayload(dataTransfer: DataTransfer): DragPayload | null {

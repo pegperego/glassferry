@@ -68,6 +68,35 @@ export function ConfirmDialog({ title, children, confirmLabel, danger, onConfirm
   );
 }
 
+interface ChooseProps {
+  title: string;
+  children: ReactNode;
+  options: { label: string; onSelect: () => void }[];
+  onCancel: () => void;
+}
+
+/** A question with several answers (e.g. which pane to replace). */
+export function ChooseDialog({ title, children, options, onCancel }: ChooseProps) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
+        <h2>{title}</h2>
+        {children}
+        <div className="actions">
+          <button onClick={onCancel} autoFocus>
+            Annulla
+          </button>
+          {options.map((o) => (
+            <button key={o.label} className="primary" onClick={o.onSelect}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Same rules as the backend (`fileops::validate_name`), for immediate feedback. */
 export function nameError(name: string): string | null {
   if (name.trim() === "") return "Il nome non può essere vuoto";

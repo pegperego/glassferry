@@ -1,6 +1,6 @@
 # Gestione connessioni e più pannelli remoti
 
-Analisi del 2026-10-27. Stato: decisa, da implementare. Voci collegate in [`roadmap.md`](roadmap.md).
+Analisi del 2026-10-27. Stato: fasi 1 e 2 implementate, fasi 3 e 4 da fare. Voci collegate in [`roadmap.md`](roadmap.md).
 
 ## Obiettivi
 

@@ -33,7 +33,11 @@ Diagnostic mode per connection (UI toggle, stored in localStorage) passes `verbo
 
 Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" sfm-slow segreta <work-dir>` (`sfm-slow` adds 20 ms each way through `scripts/delay-relay.py`). Reference: ~17 MiB/s pipelined vs ~5 MiB/s sequential; OpenSSH `sftp` ~22 MiB/s on the same path.
 
-UI triggers: button Carica/Scarica and F5 in the active pane, drag & drop between panes (onto a folder row = into that folder), files dropped from the Finder on the remote pane (Tauri `onDragDropEvent`). Progress is shown in the bottom panel's Trasferimenti tab.
+UI triggers: button Carica/Scarica and F5 in the active pane (from the local pane: the remote pane used last; ⇧F5 and the context menu list every destination), drag & drop between panes (onto a folder row = into that folder; remote → remote is refused until phase 4 of `docs/connections.md`), files dropped from the Finder on a remote pane (Tauri `onDragDropEvent`, pane found through `data-pane`). Progress is shown in the bottom panel's Trasferimenti tab, with the host's category color and a host filter.
+
+## Panes
+
+The local pane is always on the left; on the right up to two remote panes (slots `r0`, `r1`, see `dnd.ts` `Side`), managed by `useRemoteSlots.ts`. Opening a connection uses a free slot, otherwise a dialog asks which one to replace. The same connection in both slots shares one session (no new connect; "⧉ Apri nell'altro pannello" opens the current folder there); a session is disconnected only when no slot uses it. Layout toggle in the toolbar: remotes side by side or stacked (localStorage `layout.remotes`); dividers via `SplitView` (sizes in localStorage `split.*`, double click = equal parts). Window minimum 900×560.
 
 ## File operations
 
@@ -62,16 +66,16 @@ Frontend (`src/`):
 - `App.tsx` — connection state, wiring between toolbar, panes, transfers, edits and dialogs
 - `components/` — React function components only:
   - `Toolbar` (Nuovo collegamento ⌘K, Gestisci connessioni, ⌘J), `QuickConnect` (search palette), `ConnectionManager` (modal: list, form, import from ~/.ssh/config, categories, import/export file)
-  - `FilePane` (generic virtualized pane: keyboard, context menu, inline rename, drag & drop; `color` = category border), `RemotePane` (name + category badge), `ContextMenu`
+  - `FilePane` (generic virtualized pane: keyboard, context menu, inline rename, drag & drop with `acceptsFrom`, `transferTargets` for ⇧F5; `color` = category border), `RemotePane` (name + category badge, open in other pane, close), `SplitView` (draggable dividers), `ContextMenu`
   - `BottomPanel` (tabs Log / Trasferimenti / File aperti, ⌘J), `TransfersView`, `EditsView`
-  - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `Dialogs` (`PromptDialog`, `ConfirmDialog`, `nameError`)
-- hooks: `usePane.ts` (path, entries, sort, hidden files, selection), `useConnections.ts`, `useActivityLog.ts`, `useTransfers.ts`, `useEdits.ts`
+  - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `Dialogs` (`PromptDialog`, `ConfirmDialog`, `ChooseDialog`, `nameError`)
+- hooks: `usePane.ts` (path, entries, sort, hidden files, selection), `useRemoteSlots.ts` (the two remote slots, shared sessions), `useConnections.ts`, `useActivityLog.ts`, `useTransfers.ts`, `useEdits.ts`
 - pure modules (tested with vitest): `connections.ts` (search, import, merge, validation mirroring the backend), `fileList.ts` (sorting/selection), `logStore.ts` (log merge/filter), `dnd.ts` (drag payload, grouping by parent)
 - `paths.ts` (remote POSIX paths), `format.ts`, `settings.ts` (`usePersistentState`, localStorage with safe fallbacks)
 
 Other:
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`, `sfm-slow`); `scripts/delay-relay.py` adds latency for `sfm-slow`
-- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (phase 1 done, phases 2–4 to implement)
+- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (phases 1–2 done, 3–4 to implement)
 
 ## Commands
 

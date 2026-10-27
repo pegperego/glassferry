@@ -27,6 +27,8 @@ interface Props {
   log: ActivityLog;
   transfers: Transfers;
   edits: Edits;
+  /** Category color of a host (connection name), for transfers and open files. */
+  hostColor: (host: string) => string | undefined;
   tab: BottomTab;
   onTab: (tab: BottomTab) => void;
   open: boolean;
@@ -36,8 +38,14 @@ interface Props {
 }
 
 /** Bottom panel with the activity log and the transfer queue. */
-export function BottomPanel({ log, transfers, edits, tab, onTab, open, onToggle, height, onResize }: Props) {
+export function BottomPanel({ log, transfers, edits, hostColor, tab, onTab, open, onToggle, height, onResize }: Props) {
   const [filter, setFilter] = useState<LogFilter>(emptyFilter);
+  /** Host filter of the Trasferimenti and File aperti tabs. */
+  const [itemHost, setItemHost] = useState<string | null>(null);
+  const itemHosts = useMemo(
+    () => [...new Set([...transfers.jobs.map((j) => j.host), ...edits.edits.map((e) => e.host)])].sort(),
+    [transfers.jobs, edits.edits],
+  );
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -100,6 +108,16 @@ export function BottomPanel({ log, transfers, edits, tab, onTab, open, onToggle,
             <span className={edits.unsyncedCount > 0 ? "badge error-badge" : "badge active-badge"}>{edits.edits.length}</span>
           )}
         </button>
+        {open && (tab === "transfers" || tab === "edits") && itemHosts.length > 1 && (
+          <select value={itemHost ?? ""} onChange={(e) => setItemHost(e.target.value || null)}>
+            <option value="">Tutti gli host</option>
+            {itemHosts.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+        )}
         {open && tab === "transfers" && (
           <>
             <span className="spacer" />
@@ -166,8 +184,8 @@ export function BottomPanel({ log, transfers, edits, tab, onTab, open, onToggle,
           </>
         )}
       </header>
-      {open && tab === "transfers" && <TransfersView transfers={transfers} />}
-      {open && tab === "edits" && <EditsView edits={edits} />}
+      {open && tab === "transfers" && <TransfersView transfers={transfers} host={itemHost} hostColor={hostColor} />}
+      {open && tab === "edits" && <EditsView edits={edits} host={itemHost} hostColor={hostColor} />}
       {open && tab === "log" && (
         <div className={selected ? "log-body with-details" : "log-body"}>
           <LogList entries={visible} selectedId={selectedId} onSelect={setSelectedId} />

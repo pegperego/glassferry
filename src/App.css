@@ -102,10 +102,74 @@ kbd {
 
 .panes {
   flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   min-width: 0;
   min-height: 0;
+}
+
+/* SplitView: panes with draggable dividers */
+.split {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-row {
+  flex-direction: row;
+}
+
+.split-column {
+  flex-direction: column;
+}
+
+.split-cell {
+  flex-basis: 0;
+  flex-shrink: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-cell > * {
+  flex: 1;
+}
+
+.splitter {
+  flex: none;
+  background: var(--border);
+}
+
+.split-row > .splitter {
+  width: 1px;
+  cursor: col-resize;
+  /* Wider hit area than the visible line. */
+  box-shadow: 0 0 0 2px transparent;
+  padding: 0 2px;
+  margin: 0 -2px;
+  background-clip: content-box;
+  z-index: 1;
+}
+
+.split-column > .splitter {
+  height: 1px;
+  cursor: row-resize;
+  padding: 2px 0;
+  margin: -2px 0;
+  background-clip: content-box;
+  z-index: 1;
+}
+
+.splitter:hover {
+  background-color: var(--accent);
+}
+
+body.resizing {
+  user-select: none;
+}
+
+body.resizing * {
+  cursor: inherit !important;
 }
 
 .pane {
@@ -1336,4 +1400,28 @@ button.link {
 
 .categories-table .checkbox {
   margin-top: 0;
+}
+
+.host-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* Narrow panes (three columns): the path goes to its own line. */
+@container (max-width: 620px) {
+  .pane-header {
+    flex-wrap: wrap;
+  }
+
+  .pane-header .breadcrumb {
+    order: 10;
+    flex-basis: 100%;
+  }
+
+  .pane-title {
+    max-width: none;
+    margin-right: auto;
+  }
 }

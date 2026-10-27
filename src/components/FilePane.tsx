@@ -48,10 +48,14 @@ interface Props {
   onActivate: () => void;
   side: Side;
   ops: PaneOps;
-  /** Copy to the other pane (button and F5); absent when not possible. */
+  /** Copy to the default other pane (button and F5); absent when not possible. */
   transfer?: { label: string; title: string; run: (names: string[]) => void };
-  /** Files dragged from the other pane, dropped into `targetDir`. */
+  /** Every copy destination: ⇧F5 menu and context menu. */
+  transferTargets?: { label: string; run: (names: string[]) => void }[];
+  /** Files dragged from another pane, dropped into `targetDir`. */
   onDropFiles?: (payload: DragPayload, targetDir: string) => void;
+  /** Panes whose drags this pane accepts (besides itself, which moves). */
+  acceptsFrom?: Side[];
   /** Double click / Enter on a file: edit (remote) or open (local). */
   openFile?: { label: string; run: (path: string) => void };
 }
@@ -63,6 +67,8 @@ type Dialog =
 
 export function FilePane(props: Props) {
   const { pane, title, actions, info, color, active, onActivate, side, ops, transfer, onDropFiles, openFile } = props;
+  const transferTargets = props.transferTargets ?? [];
+  const acceptsFrom = props.acceptsFrom ?? [];
   const { path, visible, selection, sort } = pane;
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -70,7 +76,8 @@ export function FilePane(props: Props) {
   /** Drop target while dragging: a folder row name, "" for the pane itself. */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry | null } | null>(null);
+  /** Context menu; with `targets`, the ⇧F5 menu of copy destinations for those names. */
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry | null; targets?: string[] } | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
@@ -165,7 +172,11 @@ export function FilePane(props: Props) {
     else if (e.key === "." && e.metaKey && e.shiftKey) pane.setShowHidden(!pane.showHidden);
     else if (e.key === "F2") startRename(selection.cursor);
     else if (e.key === "F7" || (e.key.toLowerCase() === "n" && e.metaKey && e.shiftKey)) setDialog({ kind: "mkdir" });
-    else if (e.key === "F5" && transfer) {
+    else if (e.key === "F5" && e.shiftKey && transferTargets.length > 0) {
+      const chosen = selectionOrCursor();
+      const rect = listRef.current?.getBoundingClientRect();
+      if (chosen.length > 0 && rect) setMenu({ x: rect.left + 24, y: rect.top + 8, entry: null, targets: chosen });
+    } else if (e.key === "F5" && transfer) {
       const chosen = selectionOrCursor();
       if (chosen.length > 0) transfer.run(chosen);
     } else handled = false;
@@ -187,7 +198,7 @@ export function FilePane(props: Props) {
     if (source === null) return;
     const intoFolder = entry !== undefined && isDirLike(entry);
     if (source === side && !intoFolder) return;
-    if (source !== side && !onDropFiles) return;
+    if (source !== side && (!onDropFiles || !acceptsFrom.includes(source))) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = source === side ? "move" : "copy";
@@ -202,7 +213,7 @@ export function FilePane(props: Props) {
     e.stopPropagation();
     const targetDir = entry && isDirLike(entry) ? joinPath(path, entry.name) : path;
     if (payload.side !== side) {
-      onDropFiles?.(payload, targetDir);
+      if (acceptsFrom.includes(payload.side)) onDropFiles?.(payload, targetDir);
     } else if (entry && isDirLike(entry) && !payload.names.includes(entry.name) && payload.dir !== targetDir) {
       void run("Spostamento…", () => ops.move(payload.dir, payload.names, targetDir));
     }
@@ -227,6 +238,8 @@ export function FilePane(props: Props) {
     if (entry && !isDirLike(entry) && openFile && chosen.length === 1)
       items.push({ label: openFile.label, shortcut: "↩", onSelect: () => open(entry) });
     if (entry && transfer) items.push({ label: transfer.label, shortcut: "F5", onSelect: () => transfer.run(chosen) });
+    if (entry && transferTargets.length > 1)
+      for (const target of transferTargets) items.push({ label: target.label, onSelect: () => target.run(chosen) });
     if (entry) {
       items.push(
         { separator: true },
@@ -257,6 +270,7 @@ export function FilePane(props: Props) {
   return (
     <section
       className={`pane${active ? " active" : ""}${color ? " colored" : ""}`}
+      data-pane={side}
       style={color ? ({ "--pane-color": color } as CSSProperties) : undefined}
       onFocus={onActivate}
       onMouseDown={onActivate}
@@ -287,7 +301,7 @@ export function FilePane(props: Props) {
         {transfer && (
           <button
             className="transfer-button"
-            title={`${transfer.title} (F5)`}
+            title={`${transfer.title} (F5${transferTargets.length > 1 ? ", ⇧F5 per scegliere" : ""})`}
             disabled={selectionOrCursor().length === 0}
             onClick={() => transfer.run(selectionOrCursor())}
           >
@@ -318,7 +332,6 @@ export function FilePane(props: Props) {
         }}
         onDrop={(e) => onDrop(e)}
         onContextMenu={(e) => onContextMenu(e, null)}
-        data-pane={side}
       >
         <div className="file-row file-head">
           <SortHeader label="Nome" column="name" sort={sort} onSort={pane.setSort} />
@@ -378,7 +391,18 @@ export function FilePane(props: Props) {
               : `${visible.length} elementi`)}
       </footer>
 
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={
+            menu.targets
+              ? transferTargets.map((t) => ({ label: t.label, onSelect: () => t.run(menu.targets!) }))
+              : menuItems(menu.entry)
+          }
+          onClose={() => setMenu(null)}
+        />
+      )}
 
       {dialog?.kind === "mkdir" && path !== null && (
         <PromptDialog

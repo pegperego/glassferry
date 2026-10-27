@@ -11,8 +11,16 @@ const STATE_LABEL: Record<EditInfo["state"], string> = {
   error: "Errore",
 };
 
-export function EditsView({ edits }: { edits: Edits }) {
+interface Props {
+  edits: Edits;
+  /** Show only this host's files. */
+  host: string | null;
+  hostColor: (host: string) => string | undefined;
+}
+
+export function EditsView({ edits, host, hostColor }: Props) {
   const [closing, setClosing] = useState<EditInfo | null>(null);
+  const shown = host ? edits.edits.filter((e) => e.host === host) : edits.edits;
   if (edits.edits.length === 0) {
     return (
       <p className="transfers-empty muted">
@@ -23,14 +31,18 @@ export function EditsView({ edits }: { edits: Edits }) {
   }
   return (
     <div className="transfers">
-      {edits.edits.map((edit) => (
+      {shown.map((edit) => (
         <div key={edit.id} className={`edit-row ${edit.state}`}>
           <span className={`edit-dot ${edit.state}`} title={STATE_LABEL[edit.state]} />
           <div className="transfer-main">
             <div className="transfer-title">
               <strong>{edit.remotePath.split("/").pop()}</strong>
+              <span className="host-chip">
+                <span className="category-dot" style={{ background: hostColor(edit.host) ?? "var(--muted)" }} />
+                {edit.host}
+              </span>
               <span className="muted" title={edit.remotePath}>
-                {edit.host}:{edit.remotePath}
+                {edit.remotePath}
               </span>
             </div>
             <div className="transfer-meta muted">

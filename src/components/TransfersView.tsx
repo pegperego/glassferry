@@ -13,7 +13,15 @@ const STATE_LABEL: Record<JobInfo["state"], string> = {
   cancelled: "Annullato",
 };
 
-export function TransfersView({ transfers }: { transfers: Transfers }) {
+interface Props {
+  transfers: Transfers;
+  /** Show only this host's jobs. */
+  host: string | null;
+  hostColor: (host: string) => string | undefined;
+}
+
+export function TransfersView({ transfers, host, hostColor }: Props) {
+  const jobs = host ? transfers.jobs.filter((j) => j.host === host) : transfers.jobs;
   if (transfers.jobs.length === 0) {
     return (
       <p className="transfers-empty muted">
@@ -24,14 +32,14 @@ export function TransfersView({ transfers }: { transfers: Transfers }) {
   }
   return (
     <div className="transfers">
-      {[...transfers.jobs].reverse().map((job) => (
-        <TransferRow key={job.id} job={job} onCancel={() => transfers.cancel(job.id)} />
+      {[...jobs].reverse().map((job) => (
+        <TransferRow key={job.id} job={job} color={hostColor(job.host)} onCancel={() => transfers.cancel(job.id)} />
       ))}
     </div>
   );
 }
 
-function TransferRow({ job, onCancel }: { job: JobInfo; onCancel: () => void }) {
+function TransferRow({ job, color, onCancel }: { job: JobInfo; color: string | undefined; onCancel: () => void }) {
   const [showErrors, setShowErrors] = useState(false);
   const finished = isFinished(job);
   const percent = job.totalBytes > 0 ? Math.min(100, (job.doneBytes / job.totalBytes) * 100) : finished ? 100 : 0;
@@ -47,8 +55,12 @@ function TransferRow({ job, onCancel }: { job: JobInfo; onCancel: () => void }) 
       <div className="transfer-main">
         <div className="transfer-title">
           <strong>{what}</strong>
+          <span className="host-chip">
+            <span className="category-dot" style={{ background: color ?? "var(--muted)" }} />
+            {job.host}
+          </span>
           <span className="muted" title={`${job.srcDir} → ${job.dstDir}`}>
-            {job.direction === "upload" ? `→ ${job.host}:${job.dstDir}` : `${job.host} → ${job.dstDir}`}
+            {job.direction === "upload" ? `${job.srcDir} → ${job.dstDir}` : `${job.srcDir} → ${job.dstDir} (locale)`}
           </span>
         </div>
         <div className="progress">

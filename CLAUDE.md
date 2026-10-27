@@ -30,7 +30,7 @@ Diagnostic mode per host (UI toggle, stored in localStorage) passes `verbose` to
 
 Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" sfm-slow segreta <work-dir>` (`sfm-slow` adds 20 ms each way through `scripts/delay-relay.py`). Reference: ~17 MiB/s pipelined vs ~5 MiB/s sequential; OpenSSH `sftp` ~22 MiB/s on the same path.
 
-UI triggers: button Carica/Scarica and F5 in the active pane, drag & drop between panes (onto a folder row = into that folder), files dropped from the Finder on the remote pane (Tauri `onDragDropEvent`). The bottom panel has two tabs, Log and Trasferimenti.
+UI triggers: button Carica/Scarica and F5 in the active pane, drag & drop between panes (onto a folder row = into that folder), files dropped from the Finder on the remote pane (Tauri `onDragDropEvent`). Progress is shown in the bottom panel's Trasferimenti tab.
 
 ## File operations
 
@@ -46,17 +46,28 @@ UI: double click / Enter on a remote file = edit, on a local file = open with th
 
 ## Layout
 
-- `src-tauri/src/lib.rs` — Tauri state, commands, exit cleanup
-- `src-tauri/src/{ssh_config,session,askpass,runtime_dir,error}.rs`
-- `src-tauri/src/entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
-- `src-tauri/examples/spike.rs` — headless connect/probe/list/throughput check
-- `src/api.ts` — typed wrappers for every Tauri command/event (keep in sync with `lib.rs`)
-- `src/components/` — React function components only: `FilePane` (generic virtualized pane), `RemotePane`, `HostList`, `AskpassDialog`
-- `src/usePane.ts` — pane state hook (path, entries, sort, hidden files, selection); `src/fileList.ts` — pure sorting/selection logic (tested in `fileList.test.ts`)
-- `src/paths.ts` (remote POSIX paths), `src/format.ts`
-- `src/components/LogPanel.tsx`, `src/useActivityLog.ts`, `src/logStore.ts` (pure merge/filter, tested) — bottom log panel (⌘J)
-- `src/settings.ts` — `usePersistentState` (localStorage with safe fallbacks)
-- `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`)
+Backend (`src-tauri/src/`):
+- `lib.rs` — Tauri state, commands, exit cleanup
+- `ssh_config.rs` (host aliases), `session.rs` (master, channels, probe, `sh_command`), `askpass.rs`, `runtime_dir.rs`, `error.rs`
+- `log.rs` — activity log (ring buffer, events, rotating file)
+- `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
+- `transfer.rs`, `fileops.rs`, `edit.rs` — see the sections above
+- `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `fileops.rs`, `edit.rs`
+
+Frontend (`src/`):
+- `api.ts` — typed wrappers for every Tauri command/event (keep in sync with `lib.rs`)
+- `App.tsx` — connection state, wiring between panes, transfers, edits and dialogs
+- `components/` — React function components only:
+  - `FilePane` (generic virtualized pane: keyboard, context menu, inline rename, drag & drop), `RemotePane`, `HostList`, `ContextMenu`
+  - `BottomPanel` (tabs Log / Trasferimenti / File aperti, ⌘J), `TransfersView`, `EditsView`
+  - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `Dialogs` (`PromptDialog`, `ConfirmDialog`, `nameError`)
+- hooks: `usePane.ts` (path, entries, sort, hidden files, selection), `useActivityLog.ts`, `useTransfers.ts`, `useEdits.ts`
+- pure modules (tested with vitest): `fileList.ts` (sorting/selection), `logStore.ts` (log merge/filter), `dnd.ts` (drag payload, grouping by parent)
+- `paths.ts` (remote POSIX paths), `format.ts`, `settings.ts` (`usePersistentState`, localStorage with safe fallbacks)
+
+Other:
+- `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`, `sfm-slow`); `scripts/delay-relay.py` adds latency for `sfm-slow`
+- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work
 
 ## Commands
 
@@ -78,6 +89,8 @@ scripts/test-sshd.sh stop
 - UI text in Italian for now; code, comments and identifiers in English.
 - UI checks without the native window: run `pnpm dev` and open http://localhost:1420 with Playwright, mocking `window.__TAURI_INTERNALS__` (`invoke`, `transformCallback`, `metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } }`) and `window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} }` via `page.addInitScript`. Events are delivered by calling the callback registered through `plugin:event|listen`.
 
-## Out of scope (MVP)
+## Roadmap
 
-Windows, drag out to Finder, File Provider integration, choosing the editor app per file type, chmod/chown UI, resume of interrupted transfers, server-side copy between remote directories.
+`docs/roadmap.md` (Italian) tracks future work. When a new feature or improvement is proposed (by the user or as a suggestion at the end of a phase), add it there with the date and a short motivation; when one is done, move it to "Fatto" with the commit. Out-of-scope items for the MVP are listed there too.
+
+When a design decision is taken or changed, update `docs/architecture.md`.

@@ -1,20 +1,70 @@
 # SSH File Manager
 
-A free, open source SFTP client for macOS and Linux that uses your system OpenSSH, so it honours your `~/.ssh/config` exactly as the terminal does (Include, Match, ProxyJump, IdentityAgent such as 1Password, ...). Nothing is installed on the server: only the standard SFTP subsystem is used.
+A free, open source SFTP client for macOS and Linux that uses your system OpenSSH. It honours your `~/.ssh/config` exactly as the terminal does: `Include`, `Match`, `ProxyJump`, `IdentityAgent` (1Password and other agents), `RemoteCommand`. Nothing is installed on the server: only the standard SFTP subsystem is used, plus ordinary shell commands when the account allows them.
 
-Status: early development (connection spike).
+Status: MVP complete, not yet released. The interface is in Italian for now.
+
+## Features
+
+- **Hosts from your ssh config.** Every `Host` alias, following `Include`; effective settings come from `ssh -G`.
+- **Prompts inside the app.** Passwords, passphrases, OTP codes, FIDO confirmations and unknown host keys are asked in the app window through `SSH_ASKPASS`.
+- **Dual pane, local | remote.**
+  - Virtualized lists, sorting, hidden files, Finder-style selection, full keyboard navigation.
+- **Transfers.**
+  - Recursive upload and download, with a queue, progress, speed and cancel.
+  - Conflict prompts (overwrite / skip, apply to all).
+  - Drag & drop between panes and from the Finder.
+  - Files are written to a temporary name and renamed at the end, so a destination file is never left truncated.
+- **File operations.**
+  - New folder, rename, move and delete. Never overwrites.
+  - Local deletes go to the Trash; remote deletes are permanent and confirmed first.
+- **Edit remote files with your default app.** Every save is uploaded. If someone else changed the file on the server meanwhile, the app asks before overwriting.
+- **Activity log.**
+  - Every ssh command, SFTP request and remote command, with its exact command line and a terminal equivalent.
+  - Also kept in a rotating log file. A diagnostic mode per host adds `ssh -v` output.
+- **Works with SFTP-only accounts** (`ForceCommand internal-sftp`, chroot). When a shell is available it speeds up recursive delete, cross-filesystem moves and conflict detection.
+
+## Keyboard
+
+| Key | Action |
+|---|---|
+| ↑ ↓, Page Up/Down, Home/End (⇧ extends) | Move the cursor |
+| Enter, ⌘↓ | Open folder / edit remote file / open local file |
+| ⌫, ⌘↑ | Parent folder |
+| ⌘A, Esc | Select all, clear selection |
+| ⇧⌘. | Show hidden files |
+| F5 | Copy the selection to the other pane |
+| F2 | Rename |
+| F7, ⇧⌘N | New folder |
+| ⌘⌫, Delete | Delete |
+| ⌘J | Show / hide the bottom panel |
+
+## Privacy and local files
+
+| What | Where |
+|---|---|
+| Passwords, passphrases and askpass answers | Never stored or logged |
+| Activity log | `~/Library/Logs/SSH File Manager/` (Linux: `$XDG_STATE_HOME/sshfilemanager/logs`) |
+| Local copies of files being edited | `~/Library/Caches/sshfilemanager/edit/`. Removed when closed, and on exit once synced |
+| Control sockets | `/tmp/sfm-<uid>` (mode 0700) |
+
+## Requirements
+
+- macOS or Linux with OpenSSH 8.4 or newer (`SSH_ASKPASS_REQUIRE`).
+- To build: Rust (rustup), Node 22+, pnpm.
 
 ## Development
-
-Requirements: Rust (rustup), Node 22+, pnpm, OpenSSH 8.4+.
 
 ```sh
 pnpm install
 pnpm tauri dev
 ```
 
-See `CLAUDE.md` for architecture notes and test commands.
+Further reading:
+- [`CLAUDE.md`](CLAUDE.md): architecture, modules and test commands, including a local test sshd.
+- [`docs/architecture.md`](docs/architecture.md): design decisions and why they were taken.
+- [`docs/roadmap.md`](docs/roadmap.md): planned and proposed work.
 
 ## License
 
-MIT
+[MIT](LICENSE)

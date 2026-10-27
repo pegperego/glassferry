@@ -8,7 +8,7 @@ Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in co
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
-| Prova sul campo con i server reali | da fare | 2026-10-27 | Verificare nell'app vera ciò che i test non coprono: drop dal Finder (conversione `devicePixelRatio`), Cestino locale, modifica con un editor reale (TextEdit, VS Code, vim), ProxyJump, 1Password, 2FA/TOTP |
+| Prova con configurazioni ssh complesse | proposta | 2026-10-27 | ProxyJump, 1Password (`IdentityAgent`), 2FA/TOTP, `Match`: non presenti nel config usato per la prova sul campo |
 | Pubblicazione su GitHub | da fare | 2026-10-27 | Deciso all'inizio: git locale ora, GitHub dopo l'MVP |
 | Build firmata e notarizzata per macOS (arm64 e x64) | da fare | 2026-10-27 | Distribuzione fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` |
 | Pacchetti Linux (AppImage / deb) | proposta | 2026-10-27 | Linux è una piattaforma supportata, ma finora provato solo su macOS |
@@ -61,3 +61,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Trasferimenti con coda, conflitti e drag & drop | `263c3c5` |
 | Operazioni sui file: nuova cartella, rinomina, sposta, elimina | `737d0ce` |
 | Modifica dei file remoti con l'app predefinita | `c89eb90` |
+| Prova sul campo con i server reali: esito positivo (2026-10-27) | — |

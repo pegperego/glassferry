@@ -25,7 +25,7 @@ Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in an
 | Diff nel conflitto di modifica | proposta | 2026-10-27 | Oggi il dialogo mostra solo dimensione e data |
 | Scegliere l'app di modifica per tipo di file | proposta | 2026-10-27 | Oggi si usa sempre l'app predefinita del sistema |
 | Segnalibri per host e cartella | proposta | 2026-10-27 | |
-| Gestione connessioni: elenco interno (importate da `~/.ssh/config` o configurate nell'app), categorie con colore, password nel Portachiavi, toolbar con ⌘K e modale di gestione | da fare | 2026-10-27 | Progetto in [`connections.md`](connections.md), fase 1 |
+| Gestione connessioni: elenco interno (importate da `~/.ssh/config` o configurate nell'app), categorie con colore, password nel Portachiavi, toolbar con ⌘K e modale di gestione | in corso | 2026-10-27 | Progetto in [`connections.md`](connections.md), fase 1: implementata, da provare nell'app |
 | Fino a 2 connessioni in pannelli affiancati o impilati, drag & drop tra tutti i pannelli | da fare | 2026-10-27 | [`connections.md`](connections.md), fase 2 |
 | Conferme rinforzate per le categorie protette, con anteprima dei comandi | da fare | 2026-10-27 | [`connections.md`](connections.md), fase 3 |
 | Trasferimenti da remoto a remoto (streaming via Mac, `cp -a` sulla stessa connessione) | da fare | 2026-10-27 | [`connections.md`](connections.md), fase 4; assorbe "Copia lato server tra cartelle remote" |

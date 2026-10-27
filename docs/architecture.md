@@ -97,7 +97,19 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 - **React 19 + TypeScript strict.** Scelto perché è il framework su cui un agente di coding lavora con più affidabilità; Svelte era l'alternativa più leggera.
 - La logica pura (ordinamento, selezione, log, drag & drop) sta in moduli TypeScript testati con vitest, non nei componenti.
 
-## 10. Distribuzione
+## 10. Connessioni dell'app
+
+L'app tiene un proprio elenco di connessioni, con nome e categoria colorata. Il progetto completo è in [`connections.md`](connections.md).
+
+- **Alias di `~/.ssh/config`:** l'app salva solo l'alias e i propri metadati, e ssh legge il tuo config come sempre.
+- **Connessioni configurate nell'app:** l'app scrive un `ssh_config` suo, con un blocco `Host sfm-<id>` per ognuna, e avvia ssh con `-F`.
+  - Il file termina con `Match all`, `Include ~/.ssh/config` e `Include /etc/ssh/ssh_config`. Così valgono i tuoi default (1Password, `Host *`), ProxyJump può puntare ai tuoi alias, e il file di sistema viene letto anche se `-F` lo escluderebbe.
+  - Il principio non cambia: l'app scrive il config, ma è sempre ssh a interpretarlo.
+  - Verificato sul server di test, compreso ProxyJump tra due connessioni dell'app: ssh passa `-F` anche al processo del jump.
+  - Le opzioni libere passano da una validazione (`Host`, `Match` e `Include` sono rifiutate) e da `ssh -G` su un file temporaneo, così un'opzione sbagliata la segnala ssh.
+- **Password:** solo nel Portachiavi, una voce per connessione. L'askpass le usa una volta sola per connessione, quindi una password cambiata fa comparire il dialogo invece di andare in loop.
+
+## 11. Distribuzione
 
 Fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` e di leggere `~/.ssh`. Build firmata e notarizzata, arm64 e x64 (in roadmap).
 

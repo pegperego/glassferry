@@ -48,7 +48,7 @@ fn main() {
                     PromptKind::Notice => None,
                 };
                 if req.kind != PromptKind::Notice {
-                    responder.get().unwrap().respond(req.id, answer);
+                    responder.get().unwrap().respond(req.id, answer, false);
                 }
             }),
             logger.clone(),
@@ -59,9 +59,11 @@ fn main() {
         let launcher = SshLauncher {
             ssh_bin: PathBuf::from(ssh_bin),
             alias: alias.clone(),
+            config_file: None,
+            label: alias.clone(),
             control_path: dir.join("spike.sock"),
             log_path: dir.join("spike.log"),
-            env: askpass.env_for(alias),
+            env: askpass.env_for(alias, 0),
             verbose: std::env::var_os("SPIKE_VERBOSE").is_some(),
             logger: logger.clone(),
         };

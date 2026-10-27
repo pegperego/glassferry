@@ -3,27 +3,41 @@ import type { AskpassRequest } from "../api";
 
 interface Props {
   request: AskpassRequest;
-  onAnswer: (value: string | null) => void;
+  /** `save`: keep the password in the keychain once connected. */
+  onAnswer: (value: string | null, save?: boolean) => void;
 }
 
 /** One ssh prompt: secret input, yes/no, host key confirmation or notice. */
 export function AskpassDialog({ request, onAnswer }: Props) {
   const [value, setValue] = useState("");
-  useEffect(() => setValue(""), [request.id]);
+  const [save, setSave] = useState(true);
+  useEffect(() => {
+    setValue("");
+    setSave(true);
+  }, [request.id]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    onAnswer(value);
+    onAnswer(value, request.canSave && save);
   };
 
   return (
     <div className="modal-backdrop">
       <form className="modal" onSubmit={submit} onKeyDown={(e) => e.key === "Escape" && onAnswer(null)}>
         <h2>{title(request)}</h2>
+        {request.savedInvalid && (
+          <p className="error-text small">La password salvata nel Portachiavi non è stata accettata.</p>
+        )}
         <pre className="prompt">{request.prompt.trim()}</pre>
 
         {request.kind === "secret" && (
           <input type="password" autoFocus value={value} onChange={(e) => setValue(e.target.value)} />
+        )}
+        {request.kind === "secret" && request.canSave && (
+          <label className="checkbox">
+            <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} />
+            {request.savedInvalid ? "Aggiorna la password nel Portachiavi" : "Salva nel Portachiavi"}
+          </label>
         )}
 
         <div className="actions">

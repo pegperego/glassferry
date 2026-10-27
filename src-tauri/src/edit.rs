@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{AppError, Result};
-use crate::log::{sftp_equivalent, Channel};
+use crate::log::Channel;
 use crate::session::{sh_command, Session};
 
 const DEBOUNCE: Duration = Duration::from_millis(500);
@@ -189,7 +189,7 @@ impl EditManager {
             return Ok(info);
         }
 
-        let host = session.launcher.alias.clone();
+        let host = session.launcher.label.clone();
         let file_name = Path::new(&remote_path)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -409,7 +409,7 @@ impl EditManager {
         edit.session
             .launcher
             .logger
-            .start(Some(&edit.session.launcher.alias), Channel::Local, "edit-close", edit.info.lock().unwrap().remote_path.clone())
+            .start(Some(&edit.session.launcher.label), Channel::Local, "edit-close", edit.info.lock().unwrap().remote_path.clone())
             .ok(None);
     }
 
@@ -469,9 +469,8 @@ async fn remote_sha256(session: &Session, path: &str) -> Option<String> {
 }
 
 async fn download(session: &Session, path: &str) -> Result<(Vec<u8>, RemoteState)> {
-    let alias = &session.launcher.alias;
-    let mut op = session.launcher.logger.start(Some(alias), Channel::Sftp, "edit-open", path);
-    op.equivalent(sftp_equivalent(alias, "get", &[path]));
+    let mut op = session.launcher.log(Channel::Sftp, "edit-open", path);
+    op.equivalent(session.launcher.sftp_equivalent("get", &[path]));
     let result = async {
         let meta = session.sftp.fs().metadata(path).await?;
         if meta.file_type().is_some_and(|t| t.is_dir()) {
@@ -502,9 +501,8 @@ async fn download(session: &Session, path: &str) -> Result<(Vec<u8>, RemoteState
 }
 
 async fn upload(session: &Session, path: &str, content: &[u8]) -> Result<RemoteState> {
-    let alias = &session.launcher.alias;
-    let mut op = session.launcher.logger.start(Some(alias), Channel::Sftp, "edit-save", path);
-    op.equivalent(sftp_equivalent(alias, "put", &["<copia locale>", path]));
+    let mut op = session.launcher.log(Channel::Sftp, "edit-save", path);
+    op.equivalent(session.launcher.sftp_equivalent("put", &["<copia locale>", path]));
     let result = async {
         let mut file = session.sftp.options().write(true).create(true).truncate(true).open(path).await?;
         file.write_all(content).await?;

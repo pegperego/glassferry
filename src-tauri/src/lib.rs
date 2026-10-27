@@ -1,4 +1,5 @@
 pub mod askpass;
+pub mod connections;
 pub mod edit;
 pub mod entry;
 pub mod error;
@@ -18,7 +19,8 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
-use askpass::AskpassServer;
+use askpass::{AskpassServer, AttemptOptions};
+use connections::{keychain, ConnectionStore, Source, Store};
 use error::{AppError, Result};
 use entry::FileEntry;
 use log::{LogEntry, Logger};
@@ -37,6 +39,10 @@ struct AppState {
     logger: Arc<Logger>,
     transfers: Arc<TransferManager>,
     edits: Arc<EditManager>,
+    connection_store: ConnectionStore,
+    connections: Mutex<Store>,
+    /// Problem met loading `connections.json`, shown once by the UI.
+    connections_warning: Mutex<Option<String>>,
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<u64, Arc<Session>>>,
 }
@@ -65,25 +71,119 @@ fn list_hosts() -> Result<Vec<HostEntry>> {
     ssh_config::list_hosts()
 }
 
-#[tauri::command]
-async fn resolve_host(state: State<'_, AppState>, alias: String) -> Result<BTreeMap<String, String>> {
-    ssh_config::resolve_host(&state.ssh_bin, &alias).await
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionsLoad {
+    store: Store,
+    warning: Option<String>,
 }
 
 #[tauri::command]
-async fn connect(state: State<'_, AppState>, alias: String, verbose: bool) -> Result<ConnectResult> {
+fn connections_load(state: State<'_, AppState>) -> ConnectionsLoad {
+    ConnectionsLoad {
+        store: state.connections.lock().unwrap().clone(),
+        warning: state.connections_warning.lock().unwrap().take(),
+    }
+}
+
+/// Saves the whole store and regenerates the ssh_config. Saved passwords of
+/// removed connections (or with saving turned off) are deleted.
+#[tauri::command]
+fn connections_save(state: State<'_, AppState>, store: Store) -> Result<Store> {
+    let op = state.logger.start(None, log::Channel::Local, "connections-save", state.connection_store.ssh_config_path().to_string_lossy());
+    op.result(state.connection_store.save(&store), |_| Some(format!("{} connessioni", store.connections.len())))?;
+    let previous = std::mem::replace(&mut *state.connections.lock().unwrap(), store.clone());
+    for old in previous.connections.iter().filter(|c| c.save_password) {
+        if !store.connections.iter().any(|c| c.id == old.id && c.save_password) {
+            forget_password(&state, &old.id, &old.name);
+        }
+    }
+    Ok(store)
+}
+
+fn forget_password(state: &AppState, id: &str, label: &str) {
+    let op = state.logger.start(Some(label), log::Channel::Local, "keychain", "rimozione password salvata");
+    let _ = op.result(keychain::delete(id), |_| None);
+}
+
+#[tauri::command]
+fn connection_forget_password(state: State<'_, AppState>, id: String) -> Result<()> {
+    let name = state.connections.lock().unwrap().connection(&id)?.name.clone();
+    forget_password(&state, &id, &name);
+    Ok(())
+}
+
+/// Effective settings (`ssh -G`) of a source, saved or not.
+#[tauri::command]
+async fn connection_check(state: State<'_, AppState>, source: Source) -> Result<BTreeMap<String, String>> {
+    connections::check_source(&state.ssh_bin, &state.runtime_dir, &source).await
+}
+
+#[tauri::command]
+fn connections_export(state: State<'_, AppState>, path: String) -> Result<()> {
+    let store = state.connections.lock().unwrap().clone();
+    let op = state.logger.start(None, log::Channel::Local, "connections-export", &path);
+    let json = serde_json::to_vec_pretty(&store).map_err(|e| AppError::Other(e.to_string()))?;
+    op.result(std::fs::write(&path, json).map_err(AppError::from), |_| Some(format!("{} connessioni", store.connections.len())))
+}
+
+/// Reads an exported file; the UI merges it and saves.
+#[tauri::command]
+fn connections_import(state: State<'_, AppState>, path: String) -> Result<Store> {
+    let op = state.logger.start(None, log::Channel::Local, "connections-import", &path);
+    let result = std::fs::read(&path).map_err(AppError::from).and_then(|bytes| {
+        let store = connections::parse_store(&bytes)?;
+        store.validate()?;
+        Ok(store)
+    });
+    op.result(result, |store| Some(format!("{} connessioni", store.connections.len())))
+}
+
+#[tauri::command]
+async fn connect(state: State<'_, AppState>, connection_id: String, verbose: bool) -> Result<ConnectResult> {
+    let connection = state.connections.lock().unwrap().connection(&connection_id)?.clone();
+    let target = state.connection_store.target(&connection);
+    let saved_password = if connection.save_password {
+        let op = state.logger.start(Some(&connection.name), log::Channel::Local, "keychain", "lettura password salvata");
+        let id = connection.id.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || keychain::get(&id))
+            .await
+            .map_err(|e| AppError::Other(e.to_string()))
+            .and_then(|r| r);
+        op.result(result, |p| Some(if p.is_some() { "trovata".into() } else { "nessuna".into() })).ok().flatten()
+    } else {
+        None
+    };
+    let attempt = state.askpass.register(AttemptOptions {
+        saved_password,
+        save_enabled: connection.save_password,
+    });
+
     let id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
     let launcher = SshLauncher {
         ssh_bin: state.ssh_bin.clone(),
         control_path: state.runtime_dir.join(format!("{pid}-{id}.sock")),
         log_path: state.runtime_dir.join(format!("{pid}-{id}.log")),
-        env: state.askpass.env_for(&alias),
+        env: state.askpass.env_for(&connection.name, attempt),
         verbose,
         logger: state.logger.clone(),
-        alias,
+        alias: target.alias,
+        config_file: target.config_file,
+        label: connection.name.clone(),
     };
-    let session = Session::connect(launcher).await?;
+    let session = Session::connect(launcher).await;
+    let to_save = state.askpass.finish(attempt);
+    let session = session?;
+    if let Some(password) = to_save {
+        let op = state.logger.start(Some(&connection.name), log::Channel::Local, "keychain", "salvataggio password");
+        let id = connection.id.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || keychain::set(&id, &password))
+            .await
+            .map_err(|e| AppError::Other(e.to_string()))
+            .and_then(|r| r);
+        let _ = op.result(result, |_| None);
+    }
     let result = ConnectResult {
         session_id: id,
         home: session.home.to_string_lossy().into_owned(),
@@ -124,8 +224,8 @@ async fn disconnect(state: State<'_, AppState>, session_id: u64) -> Result<()> {
 }
 
 #[tauri::command]
-fn askpass_respond(state: State<'_, AppState>, id: u64, value: Option<String>) {
-    state.askpass.respond(id, value);
+fn askpass_respond(state: State<'_, AppState>, id: u64, value: Option<String>, save: bool) {
+    state.askpass.respond(id, value, save);
 }
 
 #[tauri::command]
@@ -279,6 +379,29 @@ fn local_open(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -
     )
 }
 
+/// Loads `connections.json` and regenerates the ssh_config. An unreadable
+/// file is set aside (never overwritten) and the app starts with defaults.
+fn load_connections(store: &ConnectionStore, logger: &Arc<Logger>) -> (Store, Option<String>) {
+    let op = logger.start(None, log::Channel::Local, "connections-load", store.ssh_config_path().with_file_name("connections.json").to_string_lossy());
+    match store.load() {
+        Ok(loaded) => {
+            op.ok(Some(format!("{} connessioni", loaded.connections.len())));
+            if let Err(e) = store.write_ssh_config(&loaded) {
+                logger.start(None, log::Channel::Local, "ssh-config", store.ssh_config_path().to_string_lossy()).fail(&e);
+            }
+            (loaded, None)
+        }
+        Err(e) => {
+            op.fail(&e);
+            let warning = match store.set_aside() {
+                Ok(path) => format!("{e}. Il file è stato rinominato in {} e l'elenco riparte vuoto.", path.display()),
+                Err(_) => e.to_string(),
+            };
+            (Store::default(), Some(warning))
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(code) = askpass::run_helper_if_requested() {
@@ -287,6 +410,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let runtime_dir = runtime_dir::create()?;
             let handle = app.handle().clone();
@@ -325,6 +449,9 @@ pub fn run() {
                 }),
                 logger.clone(),
             )?;
+            let connection_store =
+                ConnectionStore::new(ConnectionStore::default_dir().unwrap_or_else(|| runtime_dir.join("config")));
+            let (store, connections_warning) = load_connections(&connection_store, &logger);
             app.manage(AppState {
                 ssh_bin: PathBuf::from(DEFAULT_SSH_BIN),
                 runtime_dir,
@@ -332,6 +459,9 @@ pub fn run() {
                 logger,
                 transfers,
                 edits,
+                connection_store,
+                connections: Mutex::new(store),
+                connections_warning: Mutex::new(connections_warning),
                 next_session_id: AtomicU64::new(1),
                 sessions: Mutex::new(HashMap::new()),
             });
@@ -339,7 +469,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_hosts,
-            resolve_host,
+            connections_load,
+            connections_save,
+            connection_forget_password,
+            connection_check,
+            connections_export,
+            connections_import,
             connect,
             list_dir,
             local_home,

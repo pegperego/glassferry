@@ -26,7 +26,7 @@ use tokio::sync::{oneshot, Semaphore};
 
 use crate::entry::EntryKind;
 use crate::error::{AppError, Result};
-use crate::log::{sftp_equivalent, shell_line, Channel, Logger};
+use crate::log::{shell_line, Channel, Logger};
 use crate::session::Session;
 
 /// Files transferred at the same time, across all jobs.
@@ -295,7 +295,7 @@ impl TransferManager {
         let info = JobInfo {
             id,
             session_id,
-            host: session.launcher.alias.clone(),
+            host: session.launcher.label.clone(),
             direction,
             src_dir,
             dst_dir,
@@ -425,7 +425,7 @@ impl TransferManager {
     // ---- scanning ----------------------------------------------------------
 
     async fn scan(&self, job: &Job, direction: Direction, src_dir: &str, names: &[String]) -> Result<Plan> {
-        let host = job.session.launcher.alias.clone();
+        let host = job.session.launcher.label.clone();
         let op = self.logger.start(
             Some(&host),
             if direction == Direction::Upload { Channel::Local } else { Channel::Sftp },
@@ -456,7 +456,7 @@ impl TransferManager {
     // ---- directories ---------------------------------------------------------
 
     async fn make_dir(&self, job: &Job, direction: Direction, path: &str) -> Result<()> {
-        let host = job.session.launcher.alias.clone();
+        let host = job.session.launcher.label.clone();
         match direction {
             Direction::Download => {
                 let path = PathBuf::from(path);
@@ -477,7 +477,7 @@ impl TransferManager {
                     Err(_) => {}
                 }
                 let mut op = self.logger.start(Some(&host), Channel::Sftp, "mkdir", path);
-                op.equivalent(sftp_equivalent(&host, "mkdir", &[path]));
+                op.equivalent(job.session.launcher.sftp_equivalent("mkdir", &[path]));
                 op.result(fs.create_dir(path).await.map_err(AppError::from), |_| None)
             }
         }
@@ -510,10 +510,10 @@ impl TransferManager {
         }
 
         job.running.lock().unwrap().push(file.rel.clone());
-        let host = job.session.launcher.alias.clone();
+        let host = job.session.launcher.label.clone();
         let (op_name, detail, equivalent) = match direction {
-            Direction::Upload => ("upload", format!("{src} → {dst}"), sftp_equivalent(&host, "put", &[src, dst])),
-            Direction::Download => ("download", format!("{src} → {dst}"), sftp_equivalent(&host, "get", &[src, dst])),
+            Direction::Upload => ("upload", format!("{src} → {dst}"), job.session.launcher.sftp_equivalent("put", &[src, dst])),
+            Direction::Download => ("download", format!("{src} → {dst}"), job.session.launcher.sftp_equivalent("get", &[src, dst])),
         };
         let mut op = self.logger.start(Some(&host), Channel::Sftp, op_name, detail);
         op.equivalent(equivalent);
@@ -558,7 +558,7 @@ impl TransferManager {
         (self.sink)(TransferEvent::Conflict(ConflictRequest {
             id,
             job_id,
-            host: job.session.launcher.alias.clone(),
+            host: job.session.launcher.label.clone(),
             direction,
             path: dst.to_string(),
             src_size: file.size,

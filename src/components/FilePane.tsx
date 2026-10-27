@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -41,6 +42,8 @@ interface Props {
   actions?: ReactNode;
   /** Informational line under the header. */
   info?: ReactNode;
+  /** Category color of a remote connection: top border of the pane. */
+  color?: string;
   active: boolean;
   onActivate: () => void;
   side: Side;
@@ -59,7 +62,7 @@ type Dialog =
   | { kind: "delete"; names: string[] };
 
 export function FilePane(props: Props) {
-  const { pane, title, actions, info, active, onActivate, side, ops, transfer, onDropFiles, openFile } = props;
+  const { pane, title, actions, info, color, active, onActivate, side, ops, transfer, onDropFiles, openFile } = props;
   const { path, visible, selection, sort } = pane;
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -252,7 +255,12 @@ export function FilePane(props: Props) {
   const selectedBytes = selectedFiles.reduce((sum, v) => sum + (isDirLike(v) ? 0 : (v.size ?? 0)), 0);
 
   return (
-    <section className={active ? "pane active" : "pane"} onFocus={onActivate} onMouseDown={onActivate}>
+    <section
+      className={`pane${active ? " active" : ""}${color ? " colored" : ""}`}
+      style={color ? ({ "--pane-color": color } as CSSProperties) : undefined}
+      onFocus={onActivate}
+      onMouseDown={onActivate}
+    >
       <header className="pane-header">
         <strong className="pane-title">{title}</strong>
         <nav className="breadcrumb">

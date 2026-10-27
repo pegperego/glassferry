@@ -36,19 +36,75 @@ export type PromptKind = "secret" | "confirm" | "notice" | "hostKey";
 
 export interface AskpassRequest {
   id: number;
+  /** Connection name. */
   alias: string;
   prompt: string;
   kind: PromptKind;
+  /** Password prompt of a connection that saves passwords in the keychain. */
+  canSave: boolean;
+  /** The saved password was rejected. */
+  savedInvalid: boolean;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  color: string;
+  /** Destructive operations ask for a stronger confirmation. */
+  protected: boolean;
+}
+
+export type Source =
+  | { kind: "sshConfig"; alias: string }
+  | {
+      kind: "app";
+      host: string;
+      user: string | null;
+      port: number | null;
+      identityFile: string | null;
+      proxyJump: string | null;
+      /** `Keyword value` lines. */
+      extraOptions: string[];
+    };
+
+export interface Connection {
+  id: string;
+  name: string;
+  categoryId: string;
+  source: Source;
+  remoteDir: string | null;
+  localDir: string | null;
+  savePassword: boolean;
+}
+
+export interface Store {
+  version: number;
+  categories: Category[];
+  connections: Connection[];
 }
 
 export const listHosts = () => invoke<HostEntry[]>("list_hosts");
 
-export const resolveHost = (alias: string) =>
-  invoke<Record<string, string>>("resolve_host", { alias });
+/** `warning`: connections.json could not be read and was set aside. */
+export const connectionsLoad = () => invoke<{ store: Store; warning: string | null }>("connections_load");
+
+/** Saves the whole store (and regenerates the app's ssh_config). */
+export const connectionsSave = (store: Store) => invoke<Store>("connections_save", { store });
+
+export const connectionForgetPassword = (id: string) => invoke<void>("connection_forget_password", { id });
+
+/** Effective settings resolved by `ssh -G`, also for an unsaved source. */
+export const connectionCheck = (source: Source) =>
+  invoke<Record<string, string>>("connection_check", { source });
+
+export const connectionsExport = (path: string) => invoke<void>("connections_export", { path });
+
+/** Reads an exported file without saving it. */
+export const connectionsImport = (path: string) => invoke<Store>("connections_import", { path });
 
 /** `verbose` enables the diagnostic mode (`ssh -v` on the master). */
-export const connect = (alias: string, verbose: boolean) =>
-  invoke<ConnectResult>("connect", { alias, verbose });
+export const connect = (connectionId: string, verbose: boolean) =>
+  invoke<ConnectResult>("connect", { connectionId, verbose });
 
 export const listDir = (sessionId: number, path: string) =>
   invoke<FileEntry[]>("list_dir", { sessionId, path });
@@ -59,9 +115,9 @@ export const localListDir = (path: string) => invoke<FileEntry[]>("local_list_di
 
 export const disconnect = (sessionId: number) => invoke<void>("disconnect", { sessionId });
 
-/** `value === null` cancels the prompt. */
-export const askpassRespond = (id: number, value: string | null) =>
-  invoke<void>("askpass_respond", { id, value });
+/** `value === null` cancels the prompt; `save` keeps a password in the keychain once connected. */
+export const askpassRespond = (id: number, value: string | null, save = false) =>
+  invoke<void>("askpass_respond", { id, value, save });
 
 export const onAskpassRequest = (handler: (request: AskpassRequest) => void): Promise<UnlistenFn> =>
   listen<AskpassRequest>("askpass-request", (event) => handler(event.payload));

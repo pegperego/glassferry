@@ -6,8 +6,9 @@ Open source (MIT) SFTP client with a GUI, macOS first, Linux supported. Tauri 2 
 
 Never parse or reinterpret the user's `~/.ssh/config`. All connections go through the system `ssh` binary (default `/usr/bin/ssh`), so Include/Match/ProxyJump/IdentityAgent work exactly as in the terminal. Nothing is ever installed on servers.
 
-- Host list: `Host` aliases collected by `ssh_config.rs` (follows `Include`, skips wildcard/negated patterns). Effective settings only via `ssh -G`.
-- Connection (`session.rs`): the app owns a ControlMaster (`ssh -M -N -f -o ControlPersist=15m -S <sock> -E <log> -- alias`); channels reuse it with `-S <sock> -o ControlMaster=no -o RemoteCommand=none -T`.
+- Connections (`connections.rs`): the app's list in `~/Library/Application Support/sshfilemanager/connections.json` (Linux: `$XDG_CONFIG_HOME/sshfilemanager/`), with categories (color, `protected`). A connection is either an alias of `~/.ssh/config` (only the alias is stored) or configured in the app: those are written as `Host sfm-<id>` blocks to a generated `ssh_config` (0600) ending with `Match all` + `Include ~/.ssh/config` + `Include /etc/ssh/ssh_config`, and ssh runs with `-F <file>`. We write the config, ssh interprets it. Extra options are validated (`Host`/`Match`/`Include` refused) and checked with `ssh -G -F <temp file>` (`connection_check`).
+- Host aliases for the import: collected by `ssh_config.rs` (follows `Include`, skips wildcard/negated patterns). Effective settings only via `ssh -G` (`connections::resolve`).
+- Connection (`session.rs`): the app owns a ControlMaster (`ssh [-F file] -M -N -f -o ControlPersist=15m -S <sock> -E <log> -- alias`); channels reuse it with `-S <sock> -o ControlMaster=no -o RemoteCommand=none -T`. `SshLauncher.alias` is the ssh target, `label` (the connection name) is what the log, transfers, edits and prompts show.
 - SFTP: `ssh -s -- alias sftp`, stdin/stdout handed to `openssh_sftp_client::Sftp::new`. We do NOT use the `openssh` crate (it injects its own options).
 - Shell commands are an optional accelerator: `probe()` detects shell access and available commands; SFTP must always work alone (SFTP-only accounts). Remote commands are built only with `sh_command(script, args)` (paths as positional params, `env LC_ALL=C sh -c`), never by string concatenation.
 - Only add ssh options that are strictly required (listed above). Any new override needs a justification in a comment.
@@ -16,13 +17,15 @@ Never parse or reinterpret the user's `~/.ssh/config`. All connections go throug
 
 The app binary is also the `SSH_ASKPASS` helper (`askpass.rs`): when started with `SFM_ASKPASS_SOCKET` it forwards the prompt to the running app over a Unix socket (token-authenticated) and prints the answer. The app emits `askpass-request` to the UI; the UI answers with the `askpass_respond` command. Prompt kinds: `secret`, `confirm`, `notice`, `hostKey`.
 
+Saved passwords (`savePassword` per connection) live in the system keychain (`keyring` crate, service `sshfilemanager`, account = connection id), never in files. `connect` registers an askpass *attempt*: the saved password answers the first password prompt only (no dialog); if ssh asks again the dialog says it was rejected. A password typed with "Salva nel Portachiavi" checked is stored only after the connection succeeded. Passphrases, OTP and confirmations are never saved. Removing a connection (or turning saving off) deletes its keychain item.
+
 Runtime files (sockets, ssh logs) live in a short private dir (`runtime_dir.rs`): `/tmp/sfm-<uid>` or `$XDG_RUNTIME_DIR/sfm`, mode 0700. Socket paths must stay short (~104 bytes on macOS).
 
 ## Activity log
 
 Every ssh process, SFTP request, exec command, askpass prompt and local operation goes through `log.rs` (`Logger::start(...)` returns a `LogOp`; finish it with `ok`/`fail`/`result`, dropping it unfinished records an error). Entries carry the exact command line (`shell_line`) and, when useful, a terminal equivalent (`sftp_equivalent`). Ring buffer (default 1000, set from the UI), batched `log-batch` events every 100 ms, rotating text file in `~/Library/Logs/SSH File Manager/` (Linux: `$XDG_STATE_HOME/sshfilemanager/logs`). Never log askpass answers, tokens or the ssh environment. New backend operations must be logged.
 
-Diagnostic mode per host (UI toggle, stored in localStorage) passes `verbose` to `connect`: the master runs with `-v` and its debug output is attached to the connect entry.
+Diagnostic mode per connection (UI toggle, stored in localStorage) passes `verbose` to `connect`: the master runs with `-v` and its debug output is attached to the connect entry.
 
 ## Transfers
 
@@ -48,26 +51,27 @@ UI: double click / Enter on a remote file = edit, on a local file = open with th
 
 Backend (`src-tauri/src/`):
 - `lib.rs` — Tauri state, commands, exit cleanup
-- `ssh_config.rs` (host aliases), `session.rs` (master, channels, probe, `sh_command`), `askpass.rs`, `runtime_dir.rs`, `error.rs`
+- `connections.rs` (store, categories, generated ssh_config, `ssh -G`, keychain), `ssh_config.rs` (host aliases for the import), `session.rs` (master, channels, probe, `sh_command`), `askpass.rs`, `runtime_dir.rs`, `error.rs`
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
 - `transfer.rs`, `fileops.rs`, `edit.rs` — see the sections above
-- `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `fileops.rs`, `edit.rs`
+- `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `fileops.rs`, `edit.rs`, `connections.rs` (`-F`, ProxyJump between app connections, `ssh -G` errors, keychain round trip: `cargo run --example connections -- "$PWD/../.dev-sshd" segreta <work-dir>`)
 
 Frontend (`src/`):
 - `api.ts` — typed wrappers for every Tauri command/event (keep in sync with `lib.rs`)
-- `App.tsx` — connection state, wiring between panes, transfers, edits and dialogs
+- `App.tsx` — connection state, wiring between toolbar, panes, transfers, edits and dialogs
 - `components/` — React function components only:
-  - `FilePane` (generic virtualized pane: keyboard, context menu, inline rename, drag & drop), `RemotePane`, `HostList`, `ContextMenu`
+  - `Toolbar` (Nuovo collegamento ⌘K, Gestisci connessioni, ⌘J), `QuickConnect` (search palette), `ConnectionManager` (modal: list, form, import from ~/.ssh/config, categories, import/export file)
+  - `FilePane` (generic virtualized pane: keyboard, context menu, inline rename, drag & drop; `color` = category border), `RemotePane` (name + category badge), `ContextMenu`
   - `BottomPanel` (tabs Log / Trasferimenti / File aperti, ⌘J), `TransfersView`, `EditsView`
   - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `Dialogs` (`PromptDialog`, `ConfirmDialog`, `nameError`)
-- hooks: `usePane.ts` (path, entries, sort, hidden files, selection), `useActivityLog.ts`, `useTransfers.ts`, `useEdits.ts`
-- pure modules (tested with vitest): `fileList.ts` (sorting/selection), `logStore.ts` (log merge/filter), `dnd.ts` (drag payload, grouping by parent)
+- hooks: `usePane.ts` (path, entries, sort, hidden files, selection), `useConnections.ts`, `useActivityLog.ts`, `useTransfers.ts`, `useEdits.ts`
+- pure modules (tested with vitest): `connections.ts` (search, import, merge, validation mirroring the backend), `fileList.ts` (sorting/selection), `logStore.ts` (log merge/filter), `dnd.ts` (drag payload, grouping by parent)
 - `paths.ts` (remote POSIX paths), `format.ts`, `settings.ts` (`usePersistentState`, localStorage with safe fallbacks)
 
 Other:
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`, `sfm-slow`); `scripts/delay-relay.py` adds latency for `sfm-slow`
-- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (to implement)
+- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (phase 1 done, phases 2–4 to implement)
 
 ## Commands
 
@@ -87,6 +91,8 @@ scripts/test-sshd.sh stop
 - Rust: errors through `AppError` (serialized as a string to the UI); async with Tokio via `tauri::async_runtime`; Unix-only code is fine (Windows is out of scope for now).
 - TypeScript strict; function components and hooks only; domain logic in plain TS modules, not in components.
 - UI text in Italian for now; code, comments and identifiers in English.
+- Monospace font everywhere (`--mono` in `App.css`): values must line up across panes.
+- Diagnostic mode is per connection id (localStorage `connections.verbose`), toggled in the connection form.
 - UI checks without the native window: run `pnpm dev` and open http://localhost:1420 with Playwright, mocking `window.__TAURI_INTERNALS__` (`invoke`, `transformCallback`, `metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } }`) and `window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} }` via `page.addInitScript`. Events are delivered by calling the callback registered through `plugin:event|listen`.
 
 ## Roadmap

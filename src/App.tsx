@@ -9,38 +9,44 @@ import {
   fsMove,
   fsRename,
   listDir,
-  listHosts,
   localHome,
   localListDir,
   localOpen,
   onAskpassRequest,
   type AskpassRequest,
   type ConnectResult,
+  type Connection as StoredConnection,
   type Direction,
-  type HostEntry,
   type JobInfo,
   type Target,
 } from "./api";
 import { AskpassDialog } from "./components/AskpassDialog";
 import { BottomPanel, type BottomTab } from "./components/BottomPanel";
 import { ConflictDialog } from "./components/ConflictDialog";
+import { ConnectionManager } from "./components/ConnectionManager";
 import { EditConflictDialog } from "./components/EditConflictDialog";
 import { FilePane, type PaneOps } from "./components/FilePane";
-import { HostList } from "./components/HostList";
+import { QuickConnect } from "./components/QuickConnect";
 import { RemotePane } from "./components/RemotePane";
+import { Toolbar } from "./components/Toolbar";
+import { categoryOf } from "./connections";
 import { groupByParent, type DragPayload, type Side } from "./dnd";
 import { usePersistentState } from "./settings";
 import { useActivityLog } from "./useActivityLog";
+import { useConnections } from "./useConnections";
 import { useEdits } from "./useEdits";
 import { usePane } from "./usePane";
 import { useTransfers } from "./useTransfers";
 import "./App.css";
 
+/** `connection` is the stored connection as it was when connecting. */
 type Connection =
   | { state: "idle" }
-  | { state: "connecting"; alias: string }
-  | { state: "connected"; alias: string; result: ConnectResult }
-  | { state: "failed"; alias: string; error: string };
+  | { state: "connecting"; connection: StoredConnection }
+  | { state: "connected"; connection: StoredConnection; result: ConnectResult }
+  | { state: "failed"; connection: StoredConnection; error: string };
+
+type Modal = { kind: "quick" } | { kind: "manager"; startWithImport: boolean } | null;
 
 const notConnected = () => Promise.reject(new Error("non connesso"));
 
@@ -58,8 +64,9 @@ function paneOps(target: Target, permanentDelete: boolean, deleteHint: string): 
 const localOps = paneOps({ kind: "local" }, false, "Potrai recuperarli dal Cestino.");
 
 export default function App() {
-  const [hosts, setHosts] = useState<HostEntry[]>([]);
-  const [hostsError, setHostsError] = useState<string | null>(null);
+  const connections = useConnections();
+  const store = connections.store;
+  const [modal, setModal] = useState<Modal>(null);
   const [connection, setConnection] = useState<Connection>({ state: "idle" });
   const [prompts, setPrompts] = useState<AskpassRequest[]>([]);
   const [home, setHome] = useState<string | null>(null);
@@ -67,7 +74,7 @@ export default function App() {
   const [panelOpen, setPanelOpen] = usePersistentState("log.open", true);
   const [panelHeight, setPanelHeight] = usePersistentState("log.height", 200);
   const [panelTab, setPanelTab] = usePersistentState<BottomTab>("panel.tab", "log");
-  const [verboseList, setVerboseList] = usePersistentState<string[]>("hosts.verbose", []);
+  const [verboseList, setVerboseList] = usePersistentState<string[]>("connections.verbose", []);
   const verboseHosts = new Set(verboseList);
   const log = useActivityLog(panelOpen && panelTab === "log");
 
@@ -77,7 +84,8 @@ export default function App() {
     [session],
   );
   const localPane = usePane(localListDir, home);
-  const remotePane = usePane(remoteList, session?.home ?? null);
+  const remoteStart = connection.state === "connected" ? (connection.connection.remoteDir ?? connection.result.home) : null;
+  const remotePane = usePane(remoteList, remoteStart);
 
   // Refresh the destination pane when a transfer into its directory ends.
   const panesRef = useRef({ localPane, remotePane });
@@ -113,14 +121,17 @@ export default function App() {
     setPanelOpen(!panelOpen);
   };
 
-  const toggleVerbose = (alias: string) =>
-    setVerboseList(verboseHosts.has(alias) ? verboseList.filter((a) => a !== alias) : [...verboseList, alias]);
+  const toggleVerbose = (id: string) =>
+    setVerboseList(verboseHosts.has(id) ? verboseList.filter((a) => a !== id) : [...verboseList, id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
         togglePanel();
+      } else if (e.metaKey && e.key.toLowerCase() === "k" && !prompts[0]) {
+        e.preventDefault();
+        setModal({ kind: "quick" });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -128,9 +139,16 @@ export default function App() {
   });
 
   useEffect(() => {
-    listHosts().then(setHosts, (e) => setHostsError(String(e)));
     localHome().then(setHome, () => setHome("/"));
   }, []);
+
+  // First launch: nothing to connect to yet, start from the import.
+  const offeredImport = useRef(false);
+  useEffect(() => {
+    if (!store || offeredImport.current) return;
+    offeredImport.current = true;
+    if (store.connections.length === 0) setModal({ kind: "manager", startWithImport: true });
+  }, [store]);
 
   useEffect(() => {
     const unlisten = onAskpassRequest((request) =>
@@ -160,25 +178,29 @@ export default function App() {
     };
   }, []);
 
-  const answerPrompt = (value: string | null) => {
+  const answerPrompt = (value: string | null, save = false) => {
     const [current, ...rest] = prompts;
     if (!current) return;
     setPrompts(rest);
-    if (current.kind !== "notice") void askpassRespond(current.id, value);
+    if (current.kind !== "notice") void askpassRespond(current.id, value, save);
   };
 
-  const handleConnect = async (alias: string) => {
+  const handleConnect = async (connectionId: string) => {
+    const target = store?.connections.find((c) => c.id === connectionId);
+    if (!target) return;
+    setModal(null);
     if (connection.state === "connected") {
       await disconnect(connection.result.sessionId);
       edits.dropSession(connection.result.sessionId);
     }
-    setConnection({ state: "connecting", alias });
+    setConnection({ state: "connecting", connection: target });
     try {
-      const result = await connect(alias, verboseHosts.has(alias));
-      setConnection({ state: "connected", alias, result });
+      const result = await connect(connectionId, verboseHosts.has(connectionId));
+      setConnection({ state: "connected", connection: target, result });
       setActiveSide("remote");
+      if (target.localDir) void localPane.navigate(target.localDir);
     } catch (e) {
-      setConnection({ state: "failed", alias, error: String(e) });
+      setConnection({ state: "failed", connection: target, error: String(e) });
     }
   };
 
@@ -194,18 +216,24 @@ export default function App() {
   const onDrop = (payload: DragPayload, targetDir: string) =>
     startTransfer(payload.side === "local" ? "upload" : "download", payload.dir, payload.names, targetDir);
 
-  const activeAlias = connection.state === "idle" ? null : connection.alias;
+  const remoteName = connection.state === "idle" ? "" : connection.connection.name;
+  const remoteCategory =
+    store && connection.state !== "idle" ? categoryOf(store, connection.connection) : undefined;
 
   return (
     <main className="app">
-      <HostList
-        hosts={hosts}
-        error={hostsError}
-        activeAlias={activeAlias}
-        busy={connection.state === "connecting"}
-        verboseHosts={verboseHosts}
-        onToggleVerbose={toggleVerbose}
-        onConnect={(alias) => void handleConnect(alias)}
+      <Toolbar
+        current={
+          connection.state === "connecting"
+            ? `Connessione a ${remoteName}…`
+            : connection.state === "connected"
+              ? `Connesso a ${remoteName}`
+              : null
+        }
+        onQuickConnect={() => setModal({ kind: "quick" })}
+        onManage={() => setModal({ kind: "manager", startWithImport: false })}
+        panelOpen={panelOpen}
+        onTogglePanel={togglePanel}
       />
       <div className="workspace">
         <div className="panes">
@@ -220,7 +248,7 @@ export default function App() {
               session && remotePane.path !== null && localPane.path !== null
                 ? {
                     label: "Carica →",
-                    title: `Carica su ${connection.state === "connected" ? connection.alias : ""}:${remotePane.path}`,
+                    title: `Carica su ${remoteName}:${remotePane.path}`,
                     run: (names) => startTransfer("upload", localPane.path!, names, remotePane.path!),
                   }
                 : undefined
@@ -231,8 +259,9 @@ export default function App() {
           {connection.state === "connected" && remoteOps ? (
             <RemotePane
               ops={remoteOps}
-              alias={connection.alias}
-              connection={connection.result}
+              connection={connection.connection}
+              category={remoteCategory}
+              session={connection.result}
               pane={remotePane}
               active={activeSide === "remote"}
               onActivate={() => setActiveSide("remote")}
@@ -258,11 +287,18 @@ export default function App() {
             />
           ) : (
             <section className="pane placeholder">
-              {connection.state === "idle" && <p>Doppio clic su un host per connetterti.</p>}
-              {connection.state === "connecting" && <p>Connessione a {connection.alias}…</p>}
+              {connection.state === "idle" && (
+                <p>
+                  <button className="primary" onClick={() => setModal({ kind: "quick" })}>
+                    + Nuovo collegamento
+                  </button>{" "}
+                  <kbd>⌘K</kbd>
+                </p>
+              )}
+              {connection.state === "connecting" && <p>Connessione a {remoteName}…</p>}
               {connection.state === "failed" && (
                 <div className="error">
-                  <strong>Connessione a {connection.alias} fallita</strong>
+                  <strong>Connessione a {remoteName} fallita</strong>
                   <pre>{connection.error}</pre>
                 </div>
               )}
@@ -284,7 +320,35 @@ export default function App() {
           onResize={setPanelHeight}
         />
       </div>
+      {modal?.kind === "quick" && store && (
+        <QuickConnect
+          store={store}
+          onConnect={(id) => void handleConnect(id)}
+          onManage={() => setModal({ kind: "manager", startWithImport: false })}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.kind === "manager" && store && (
+        <ConnectionManager
+          store={store}
+          save={connections.save}
+          home={home}
+          verbose={verboseHosts}
+          onToggleVerbose={toggleVerbose}
+          startWithImport={modal.startWithImport}
+          onConnect={(id) => void handleConnect(id)}
+          onClose={() => setModal(null)}
+        />
+      )}
       {prompts[0] && <AskpassDialog request={prompts[0]} onAnswer={answerPrompt} />}
+      {connections.warning && (
+        <div className="toast error-toast" role="alert">
+          {connections.warning}
+          <button className="inline" onClick={connections.dismissWarning}>
+            ✕
+          </button>
+        </div>
+      )}
       {appError && (
         <div className="toast error-toast" role="alert">
           {appError}

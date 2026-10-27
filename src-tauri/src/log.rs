@@ -366,9 +366,9 @@ fn sftp_quote(path: &str) -> String {
     format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// `printf '%s\n' '<batch>' | sftp -q -b - <alias>`: reproduces an SFTP
-/// request with the stock OpenSSH client.
-pub fn sftp_equivalent(alias: &str, command: &str, paths: &[&str]) -> String {
+/// `printf '%s\n' '<batch>' | sftp -q -b - [-F file] <alias>`: reproduces an
+/// SFTP request with the stock OpenSSH client. `target` is `[-F file] alias`.
+pub fn sftp_equivalent(target: &[String], command: &str, paths: &[&str]) -> String {
     let mut batch = command.to_string();
     for path in paths {
         batch.push(' ');
@@ -377,7 +377,7 @@ pub fn sftp_equivalent(alias: &str, command: &str, paths: &[&str]) -> String {
     format!(
         "printf '%s\\n' {} | sftp -q -b - {}",
         crate::session::sh_quote(&batch),
-        shell_line([alias])
+        shell_line(target)
     )
 }
 
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn sftp_equivalent_quotes_paths() {
         assert_eq!(
-            sftp_equivalent("web", "ls -la", &["/srv/it's \"x\""]),
+            sftp_equivalent(&["web".into()], "ls -la", &["/srv/it's \"x\""]),
             r#"printf '%s\n' 'ls -la "/srv/it'\''s \"x\""' | sftp -q -b - web"#
         );
     }

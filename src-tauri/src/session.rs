@@ -28,7 +28,12 @@ const PROBED_COMMANDS: &[&str] = &["rm", "cp", "mv", "du", "find", "sha256sum", 
 #[derive(Clone)]
 pub struct SshLauncher {
     pub ssh_bin: PathBuf,
+    /// Host argument given to ssh.
     pub alias: String,
+    /// `-F` file for connections configured in the app (generated ssh_config).
+    pub config_file: Option<PathBuf>,
+    /// Name shown in the log, transfers and prompts (the connection name).
+    pub label: String,
     pub control_path: PathBuf,
     pub log_path: PathBuf,
     /// Extra environment, e.g. askpass variables. Empty means ssh uses the tty.
@@ -49,7 +54,30 @@ impl SshLauncher {
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.ssh_bin);
         cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
+        if let Some(file) = &self.config_file {
+            cmd.arg("-F").arg(file);
+        }
         cmd
+    }
+
+    /// `[-F file] alias`, for terminal equivalents.
+    fn target_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(file) = &self.config_file {
+            args.push("-F".into());
+            args.push(file.to_string_lossy().into_owned());
+        }
+        args.push(self.alias.clone());
+        args
+    }
+
+    /// Terminal equivalent of an SFTP request (see `log::sftp_equivalent`).
+    pub fn sftp_equivalent(&self, command: &str, paths: &[&str]) -> String {
+        sftp_equivalent(&self.target_args(), command, paths)
+    }
+
+    pub fn log(&self, channel: Channel, op: &str, detail: impl Into<String>) -> LogOp {
+        self.logger.start(Some(&self.label), channel, op, detail)
     }
 
     /// Command for a channel over the master. Falls back to a direct
@@ -60,10 +88,6 @@ impl SshLauncher {
             .arg(&self.control_path)
             .args(["-o", "ControlMaster=no", "-o", "RemoteCommand=none", "-T"]);
         cmd
-    }
-
-    fn log(&self, channel: Channel, op: &str, detail: impl Into<String>) -> LogOp {
-        self.logger.start(Some(&self.alias), channel, op, detail)
     }
 
     /// Starts the master and waits until authentication has completed.
@@ -91,7 +115,9 @@ impl SshLauncher {
             .stderr(Stdio::null());
 
         let mut op = self.log(Channel::Ssh, "connect", command_line(&cmd));
-        op.equivalent(shell_line(["ssh", "-v", "-N", "--", &self.alias]));
+        let mut equivalent = vec!["ssh".to_string(), "-v".into(), "-N".into()];
+        equivalent.extend(self.target_args());
+        op.equivalent(shell_line(equivalent));
         let status = match cmd.status().await {
             Ok(status) => status,
             Err(e) => {
@@ -116,6 +142,9 @@ impl SshLauncher {
 
     fn stop_command(&self) -> std::process::Command {
         let mut cmd = std::process::Command::new(&self.ssh_bin);
+        if let Some(file) = &self.config_file {
+            cmd.arg("-F").arg(file);
+        }
         cmd.arg("-S")
             .arg(&self.control_path)
             .args(["-O", "exit", "--"])
@@ -164,7 +193,7 @@ impl SshLauncher {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         let mut op = self.log(Channel::Ssh, "sftp-channel", command_line(&cmd));
-        op.equivalent(shell_line(["sftp", &self.alias]));
+        op.equivalent(shell_line(std::iter::once("sftp".to_string()).chain(self.target_args())));
         match cmd.spawn() {
             Ok(child) => Ok((child, op)),
             Err(e) => {
@@ -310,7 +339,7 @@ impl Session {
         });
 
         let mut op = launcher.log(Channel::Sftp, "realpath", ".");
-        op.equivalent(sftp_equivalent(&launcher.alias, "pwd", &[]));
+        op.equivalent(launcher.sftp_equivalent("pwd", &[]));
         let home = op.result(sftp.fs().canonicalize(".").await, |home| {
             Some(home.to_string_lossy().into_owned())
         })?;
@@ -327,7 +356,7 @@ impl Session {
     pub async fn list_dir(&self, path: &Path) -> Result<Vec<FileEntry>> {
         let path_str = path.to_string_lossy();
         let mut op = self.launcher.log(Channel::Sftp, "readdir", path_str.clone());
-        op.equivalent(sftp_equivalent(&self.launcher.alias, "ls -la", &[&path_str]));
+        op.equivalent(self.launcher.sftp_equivalent("ls -la", &[&path_str]));
         op.result(self.read_dir(path).await, |entries| Some(format!("{} voci", entries.len())))
     }
 

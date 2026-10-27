@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::entry::EntryKind;
 use crate::error::{AppError, Result};
-use crate::log::{sftp_equivalent, shell_line, Channel, Logger};
+use crate::log::{shell_line, Channel, Logger};
 use crate::session::{sh_command, Session};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -147,7 +147,7 @@ pub mod remote {
     use super::*;
 
     fn log_op(session: &Session, op: &str, detail: impl Into<String>) -> crate::log::LogOp {
-        session.launcher.logger.start(Some(&session.launcher.alias), Channel::Sftp, op, detail)
+        session.launcher.log(Channel::Sftp, op, detail)
     }
 
     async fn exists(session: &Session, path: &str) -> bool {
@@ -158,7 +158,7 @@ pub mod remote {
         validate_name(name)?;
         let path = join(dir, name);
         let mut op = log_op(session, "mkdir", &path);
-        op.equivalent(sftp_equivalent(&session.launcher.alias, "mkdir", &[&path]));
+        op.equivalent(session.launcher.sftp_equivalent("mkdir", &[&path]));
         op.result(session.sftp.fs().create_dir(&path).await.map_err(AppError::from), |_| None)
     }
 
@@ -185,9 +185,8 @@ pub mod remote {
         if exists(session, to).await && !from.eq_ignore_ascii_case(to) {
             return Err(exists_error(to));
         }
-        let alias = &session.launcher.alias;
         let mut op = log_op(session, op_name, format!("{from} → {to}"));
-        op.equivalent(sftp_equivalent(alias, "rename", &[from, to]));
+        op.equivalent(session.launcher.sftp_equivalent("rename", &[from, to]));
         let result = session.sftp.fs().rename(from, to).await.map_err(AppError::from);
         match result {
             Ok(()) => {
@@ -240,7 +239,7 @@ pub mod remote {
 
         for path in &paths {
             let mut op = log_op(session, "rm -r", path);
-            op.equivalent(sftp_equivalent(&session.launcher.alias, "rm", &[path]));
+            op.equivalent(session.launcher.sftp_equivalent("rm", &[path]));
             let result = remove_tree(session, path).await;
             op.result(result, |count| Some(format!("{count} elementi rimossi")))?;
         }

@@ -35,6 +35,8 @@ bytes = "1.12.1"
 trash = "5.2.9"
 notify = "8.2.1"
 sha2 = "0.11.1"
+tauri-plugin-dialog = "2"
+keyring = { version = "3", features = ["apple-native", "sync-secret-service", "crypto-rust"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -5,6 +5,11 @@
 //! to the running app, which shows a dialog in the UI and sends the answer
 //! back. The helper prints it on stdout (or exits 1 when cancelled), which is
 //! the contract ssh expects from an askpass program.
+//!
+//! Each connect registers an *attempt* (`register`): it carries the password
+//! saved in the keychain, used once to answer the first password prompt
+//! without a dialog, and collects a password typed with "save" checked, which
+//! the caller stores only after the connection succeeded.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,11 +27,14 @@ use crate::log::{Channel, Logger};
 pub const ENV_SOCKET: &str = "SFM_ASKPASS_SOCKET";
 pub const ENV_TOKEN: &str = "SFM_ASKPASS_TOKEN";
 pub const ENV_ALIAS: &str = "SFM_ASKPASS_ALIAS";
+pub const ENV_ATTEMPT: &str = "SFM_ASKPASS_ATTEMPT";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct HelperRequest {
     token: String,
     alias: String,
+    #[serde(default)]
+    attempt: u64,
     prompt: String,
     /// Value of `SSH_ASKPASS_PROMPT`: "confirm", "none" or empty.
     hint: String,
@@ -54,9 +62,37 @@ pub enum PromptKind {
 #[serde(rename_all = "camelCase")]
 pub struct AskpassRequest {
     pub id: u64,
+    /// Connection name.
     pub alias: String,
     pub prompt: String,
     pub kind: PromptKind,
+    /// Password prompt of a connection that saves passwords: the dialog
+    /// offers "save in keychain".
+    pub can_save: bool,
+    /// The saved password was sent and ssh asked again: it is no longer valid.
+    pub saved_invalid: bool,
+}
+
+/// Options of one connect for the askpass server.
+#[derive(Default)]
+pub struct AttemptOptions {
+    /// Password from the keychain, used for the first password prompt only.
+    pub saved_password: Option<String>,
+    /// The connection saves passwords (offer "save" in the dialog).
+    pub save_enabled: bool,
+}
+
+#[derive(Default)]
+struct Attempt {
+    options: AttemptOptions,
+    saved_used: bool,
+    to_save: Option<String>,
+}
+
+/// Password prompts (not passphrases, OTP codes or confirmations).
+fn is_password_prompt(prompt: &str) -> bool {
+    let prompt = prompt.to_ascii_lowercase();
+    prompt.contains("password") && !prompt.contains("passphrase")
 }
 
 /// If the process was launched by ssh as askpass helper, handle the request
@@ -82,6 +118,7 @@ fn helper(socket: &Path) -> std::io::Result<Option<String>> {
     let request = HelperRequest {
         token: std::env::var(ENV_TOKEN).unwrap_or_default(),
         alias: std::env::var(ENV_ALIAS).unwrap_or_default(),
+        attempt: std::env::var(ENV_ATTEMPT).ok().and_then(|v| v.parse().ok()).unwrap_or(0),
         prompt: std::env::args().nth(1).unwrap_or_default(),
         hint: std::env::var("SSH_ASKPASS_PROMPT").unwrap_or_default(),
     };
@@ -117,11 +154,15 @@ fn classify(prompt: &str, hint: &str) -> PromptKind {
 
 type Notifier = Arc<dyn Fn(AskpassRequest) + Send + Sync>;
 
+/// An open prompt: answer channel, attempt and whether it asks a password.
+type Pending = (oneshot::Sender<Option<String>>, u64, bool);
+
 pub struct AskpassServer {
     socket_path: PathBuf,
     token: String,
     next_id: AtomicU64,
-    pending: Mutex<HashMap<u64, oneshot::Sender<Option<String>>>>,
+    pending: Mutex<HashMap<u64, Pending>>,
+    attempts: Mutex<HashMap<u64, Attempt>>,
     notify: Notifier,
     logger: Arc<Logger>,
 }
@@ -142,6 +183,7 @@ impl AskpassServer {
             token: crate::runtime_dir::random_token()?,
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
+            attempts: Mutex::new(HashMap::new()),
             notify,
             logger,
         });
@@ -167,8 +209,27 @@ impl AskpassServer {
         Ok(server)
     }
 
+    /// Starts tracking one connect; returns the id to pass to `env_for`.
+    pub fn register(&self, options: AttemptOptions) -> u64 {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.attempts.lock().unwrap().insert(
+            id,
+            Attempt {
+                options,
+                ..Default::default()
+            },
+        );
+        id
+    }
+
+    /// Ends an attempt; returns the password the user asked to save, if any.
+    pub fn finish(&self, attempt: u64) -> Option<String> {
+        self.attempts.lock().unwrap().remove(&attempt).and_then(|a| a.to_save)
+    }
+
     /// Environment that makes ssh use this server for every prompt.
-    pub fn env_for(&self, alias: &str) -> Vec<(String, String)> {
+    /// `label` is the name shown in the dialog; `attempt` comes from `register` (0 = none).
+    pub fn env_for(&self, label: &str, attempt: u64) -> Vec<(String, String)> {
         let helper = std::env::current_exe()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
@@ -177,7 +238,8 @@ impl AskpassServer {
             ("SSH_ASKPASS_REQUIRE".into(), "force".into()),
             (ENV_SOCKET.into(), self.socket_path.to_string_lossy().into_owned()),
             (ENV_TOKEN.into(), self.token.clone()),
-            (ENV_ALIAS.into(), alias.into()),
+            (ENV_ALIAS.into(), label.into()),
+            (ENV_ATTEMPT.into(), attempt.to_string()),
         ]
     }
 
@@ -186,11 +248,37 @@ impl AskpassServer {
         let _ = std::fs::remove_file(&self.socket_path);
     }
 
-    /// Delivers the user's answer; `None` means cancel.
-    pub fn respond(&self, id: u64, value: Option<String>) {
-        if let Some(tx) = self.pending.lock().unwrap().remove(&id) {
-            let _ = tx.send(value);
+    /// Delivers the user's answer; `None` means cancel. With `save`, a
+    /// password is kept for the attempt (see `finish`).
+    pub fn respond(&self, id: u64, value: Option<String>, save: bool) {
+        let Some((tx, attempt, is_password)) = self.pending.lock().unwrap().remove(&id) else {
+            return;
+        };
+        if let (true, true, Some(value)) = (save, is_password, &value)
+            && let Some(attempt) = self.attempts.lock().unwrap().get_mut(&attempt)
+            && attempt.options.save_enabled
+        {
+            attempt.to_save = Some(value.clone());
         }
+        let _ = tx.send(value);
+    }
+
+    /// Answer from the keychain for the first password prompt of an attempt;
+    /// otherwise the dialog flags (can_save, saved_invalid).
+    fn saved_answer(&self, attempt: u64, kind: PromptKind, prompt: &str) -> (Option<String>, bool, bool) {
+        if kind != PromptKind::Secret || !is_password_prompt(prompt) {
+            return (None, false, false);
+        }
+        let mut attempts = self.attempts.lock().unwrap();
+        let Some(attempt) = attempts.get_mut(&attempt) else {
+            return (None, false, false);
+        };
+        let has_saved = attempt.options.saved_password.is_some();
+        if has_saved && !attempt.saved_used {
+            attempt.saved_used = true;
+            return (attempt.options.saved_password.clone(), false, false);
+        }
+        (None, attempt.options.save_enabled, has_saved)
     }
 
     async fn handle(&self, stream: UnixStream) -> std::io::Result<()> {
@@ -215,20 +303,28 @@ impl AskpassServer {
             kind.log_name(),
             request.prompt.trim(),
         );
+        let (saved, can_save, saved_invalid) = self.saved_answer(request.attempt, kind, &request.prompt);
+        let is_password = kind == PromptKind::Secret && is_password_prompt(&request.prompt);
+        let attempt = request.attempt;
         let request = AskpassRequest {
             id,
             alias: request.alias,
             kind,
             prompt: request.prompt,
+            can_save,
+            saved_invalid,
         };
-        let value = if kind == PromptKind::Notice {
+        let value = if let Some(saved) = saved {
+            op.ok(Some("risposta dal Portachiavi".into()));
+            Some(saved)
+        } else if kind == PromptKind::Notice {
             // ssh does not wait for an answer and kills the helper itself.
             (self.notify)(request);
             op.ok(Some("notifica".into()));
             None
         } else {
             let (tx, rx) = oneshot::channel();
-            self.pending.lock().unwrap().insert(id, tx);
+            self.pending.lock().unwrap().insert(id, (tx, attempt, is_password));
             (self.notify)(request);
             let value = rx.await.ok().flatten();
             match (&value, kind) {
@@ -270,5 +366,65 @@ mod tests {
             ),
             PromptKind::HostKey
         );
+    }
+
+    /// Sends one prompt as the helper would and returns the answer.
+    async fn ask(server: &AskpassServer, attempt: u64, prompt: &str) -> Option<String> {
+        let mut stream = UnixStream::connect(&server.socket_path).await.unwrap();
+        let request = HelperRequest {
+            token: server.token.clone(),
+            alias: "web".into(),
+            attempt,
+            prompt: prompt.into(),
+            hint: String::new(),
+        };
+        let mut line = serde_json::to_vec(&request).unwrap();
+        line.push(b'\n');
+        stream.write_all(&line).await.unwrap();
+        let mut answer = String::new();
+        BufReader::new(stream).read_line(&mut answer).await.unwrap();
+        serde_json::from_str::<HelperResponse>(&answer).unwrap().value
+    }
+
+    #[test]
+    fn answers_once_from_keychain_then_asks_and_keeps_the_new_password() {
+        tauri::async_runtime::block_on(async {
+            let dir = std::env::temp_dir().join(format!("sfm-askpass-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let shown: Arc<Mutex<Vec<AskpassRequest>>> = Arc::default();
+            let sink = shown.clone();
+            let slot: Arc<std::sync::OnceLock<Arc<AskpassServer>>> = Arc::default();
+            let responder = slot.clone();
+            let server = AskpassServer::start(
+                &dir,
+                Arc::new(move |request| {
+                    responder.get().unwrap().respond(request.id, Some("new".into()), true);
+                    sink.lock().unwrap().push(request);
+                }),
+                Logger::new(None, None),
+            )
+            .unwrap();
+            let _ = slot.set(server.clone());
+            let attempt = server.register(AttemptOptions {
+                saved_password: Some("old".into()),
+                save_enabled: true,
+            });
+
+            assert_eq!(ask(&server, attempt, "u@h's password: ").await.as_deref(), Some("old"));
+            assert!(shown.lock().unwrap().is_empty(), "the saved password needs no dialog");
+            assert_eq!(ask(&server, attempt, "u@h's password: ").await.as_deref(), Some("new"));
+            let request = shown.lock().unwrap()[0].clone();
+            assert!(request.can_save && request.saved_invalid);
+            assert_eq!(server.finish(attempt).as_deref(), Some("new"));
+            std::fs::remove_dir_all(dir).unwrap();
+        });
+    }
+
+    #[test]
+    fn recognises_password_prompts() {
+        assert!(is_password_prompt("deploy@10.0.0.5's password: "));
+        assert!(is_password_prompt("(deploy@web) Password:"));
+        assert!(!is_password_prompt("Enter passphrase for key '/x':"));
+        assert!(!is_password_prompt("Verification code:"));
     }
 }

@@ -36,7 +36,7 @@ fn main() {
             Arc::new(move |req| {
                 let answer = if req.kind == PromptKind::Secret { secret.clone() } else { "yes".into() };
                 if req.kind != PromptKind::Notice {
-                    responder.get().unwrap().respond(req.id, Some(answer));
+                    responder.get().unwrap().respond(req.id, Some(answer), false);
                 }
             }),
             logger.clone(),
@@ -47,9 +47,11 @@ fn main() {
             Session::connect(SshLauncher {
                 ssh_bin: PathBuf::from(ssh_bin),
                 alias: alias.clone(),
+                config_file: None,
+                label: alias.clone(),
                 control_path: dir.join("edit.sock"),
                 log_path: dir.join("edit.log"),
-                env: askpass.env_for(&alias),
+                env: askpass.env_for(&alias, 0),
                 verbose: false,
                 logger: logger.clone(),
             })

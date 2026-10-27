@@ -1,13 +1,13 @@
 //! Reads host aliases from the user's OpenSSH config.
 //!
 //! We never interpret the config ourselves beyond collecting `Host` aliases:
-//! the effective settings of a host always come from `ssh -G <alias>`.
+//! the effective settings of a host always come from `ssh -G <alias>`
+//! (`connections::resolve`).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tokio::process::Command;
 
 use crate::error::{AppError, Result};
 
@@ -140,33 +140,6 @@ fn expand_include(pattern: &str, ssh_dir: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = paths.filter_map(|p| p.ok()).filter(|p| p.is_file()).collect();
     paths.sort();
     paths
-}
-
-/// Effective configuration of a host as resolved by `ssh -G`.
-pub async fn resolve_host(ssh_bin: &Path, alias: &str) -> Result<BTreeMap<String, String>> {
-    let output = Command::new(ssh_bin)
-        .arg("-G")
-        .arg("--")
-        .arg(alias)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .await?;
-    if !output.status.success() {
-        return Err(AppError::Ssh(String::from_utf8_lossy(&output.stderr).trim().to_string()));
-    }
-    let mut map: BTreeMap<String, String> = BTreeMap::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        if let Some((key, value)) = line.split_once(' ') {
-            // Multi-valued options (identityfile, localforward...) are joined.
-            map.entry(key.to_string())
-                .and_modify(|v| {
-                    v.push('\n');
-                    v.push_str(value);
-                })
-                .or_insert_with(|| value.to_string());
-        }
-    }
-    Ok(map)
 }
 
 #[cfg(test)]

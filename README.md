@@ -6,7 +6,8 @@ Status: MVP complete, not yet released. The interface is in Italian for now.
 
 ## Features
 
-- **Hosts from your ssh config.** Every `Host` alias, following `Include`; effective settings come from `ssh -G`.
+- **Connection manager.** Import aliases from your ssh config (settings stay there) or configure connections in the app (written to a generated ssh_config that includes yours, so ssh still does the work). Each connection has a name and a colored category, e.g. a red "Produzione". Quick connect with ⌘K.
+- **Passwords in the system keychain**, per connection and only if you choose so; never in files.
 - **Prompts inside the app.** Passwords, passphrases, OTP codes, FIDO confirmations and unknown host keys are asked in the app window through `SSH_ASKPASS`.
 - **Dual pane, local | remote.**
   - Virtualized lists, sorting, hidden files, Finder-style selection, full keyboard navigation.
@@ -37,13 +38,15 @@ Status: MVP complete, not yet released. The interface is in Italian for now.
 | F2 | Rename |
 | F7, ⇧⌘N | New folder |
 | ⌘⌫, Delete | Delete |
+| ⌘K | New connection (search) |
 | ⌘J | Show / hide the bottom panel |
 
 ## Privacy and local files
 
 | What | Where |
 |---|---|
-| Passwords, passphrases and askpass answers | Never stored or logged |
+| Passwords, passphrases and askpass answers | Never logged; passwords saved only in the system keychain when enabled for a connection |
+| Connections | `~/Library/Application Support/sshfilemanager/connections.json` and the generated `ssh_config` (mode 0600), no secrets |
 | Activity log | `~/Library/Logs/SSH File Manager/` (Linux: `$XDG_STATE_HOME/sshfilemanager/logs`) |
 | Local copies of files being edited | `~/Library/Caches/sshfilemanager/edit/`. Removed when closed, and on exit once synced |
 | Control sockets | `/tmp/sfm-<uid>` (mode 0700) |

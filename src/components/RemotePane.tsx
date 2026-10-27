@@ -1,20 +1,31 @@
 import type { ComponentProps } from "react";
-import type { ConnectResult } from "../api";
+import type { Category, ConnectResult, Connection } from "../api";
 import { FilePane } from "./FilePane";
 
-type Props = Omit<ComponentProps<typeof FilePane>, "title" | "actions" | "info" | "side"> & {
-  alias: string;
-  connection: ConnectResult;
+type Props = Omit<ComponentProps<typeof FilePane>, "title" | "actions" | "info" | "side" | "color"> & {
+  connection: Connection;
+  category: Category | undefined;
+  session: ConnectResult;
   onDisconnect: () => void;
 };
 
-export function RemotePane({ alias, connection, onDisconnect, ...paneProps }: Props) {
-  const { capabilities } = connection;
+export function RemotePane({ connection, category, session, onDisconnect, ...paneProps }: Props) {
+  const { capabilities } = session;
   return (
     <FilePane
       {...paneProps}
       side="remote"
-      title={alias}
+      color={category?.color}
+      title={
+        <span className="remote-title" title={connection.name}>
+          {connection.name}
+          {category && (
+            <span className="category-badge" style={{ background: category.color }}>
+              {category.name}
+            </span>
+          )}
+        </span>
+      }
       actions={
         <button title="Disconnetti" onClick={onDisconnect}>
           ⏏

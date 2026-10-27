@@ -47,7 +47,7 @@ fn main() {
                     _ => Some(String::new()),
                 };
                 if req.kind != PromptKind::Notice {
-                    responder.get().unwrap().respond(req.id, answer);
+                    responder.get().unwrap().respond(req.id, answer, false);
                 }
             }),
             logger.clone(),
@@ -58,9 +58,11 @@ fn main() {
         let launcher = SshLauncher {
             ssh_bin: PathBuf::from(ssh_bin),
             alias: alias.clone(),
+            config_file: None,
+            label: alias.clone(),
             control_path: dir.join("transfer.sock"),
             log_path: dir.join("transfer.log"),
-            env: askpass.env_for(&alias),
+            env: askpass.env_for(&alias, 0),
             verbose: false,
             logger: logger.clone(),
         };

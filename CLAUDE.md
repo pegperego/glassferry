@@ -67,7 +67,7 @@ Frontend (`src/`):
 
 Other:
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`, `sfm-slow`); `scripts/delay-relay.py` adds latency for `sfm-slow`
-- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work
+- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (to implement)
 
 ## Commands
 

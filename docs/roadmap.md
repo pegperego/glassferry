@@ -2,7 +2,7 @@
 
 Sviluppi futuri di SSH File Manager. Ogni proposta ha la data in cui è nata e il motivo; quando viene realizzata passa in fondo, in "Fatto", con il commit.
 
-Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in corso**.
+Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in analisi**, **in corso**.
 
 ## Prossimi passi
 
@@ -18,7 +18,6 @@ Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in co
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
 | Ripresa dei trasferimenti interrotti | proposta | 2026-10-27 | SFTP permette di riprendere da un offset; candidata per la v1.1 |
-| Copia lato server tra cartelle remote | proposta | 2026-10-27 | `cp -a` via shell quando c'è; estensione `copy-data` (OpenSSH ≥ 9.0) sugli account solo SFTP |
 | chmod / chown da interfaccia | proposta | 2026-10-27 | Anche ricorsivo con `chmod -R` quando la shell è disponibile |
 | Dimensione di una cartella | proposta | 2026-10-27 | `du -sk` via shell, visita SFTP altrimenti |
 | Ricerca di file sul server | proposta | 2026-10-27 | `find` via shell |
@@ -26,7 +25,10 @@ Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in co
 | Diff nel conflitto di modifica | proposta | 2026-10-27 | Oggi il dialogo mostra solo dimensione e data |
 | Scegliere l'app di modifica per tipo di file | proposta | 2026-10-27 | Oggi si usa sempre l'app predefinita del sistema |
 | Segnalibri per host e cartella | proposta | 2026-10-27 | |
-| Più tab per pannello / più connessioni contemporanee | proposta | 2026-10-27 | Oggi una sola connessione alla volta |
+| Gestione connessioni: elenco interno (importate da `~/.ssh/config` o configurate nell'app), categorie con colore, password nel Portachiavi, toolbar con ⌘K e modale di gestione | da fare | 2026-10-27 | Progetto in [`connections.md`](connections.md), fase 1 |
+| Fino a 2 connessioni in pannelli affiancati o impilati, drag & drop tra tutti i pannelli | da fare | 2026-10-27 | [`connections.md`](connections.md), fase 2 |
+| Conferme rinforzate per le categorie protette, con anteprima dei comandi | da fare | 2026-10-27 | [`connections.md`](connections.md), fase 3 |
+| Trasferimenti da remoto a remoto (streaming via Mac, `cp -a` sulla stessa connessione) | da fare | 2026-10-27 | [`connections.md`](connections.md), fase 4; assorbe "Copia lato server tra cartelle remote" |
 | Divisore ridimensionabile tra i pannelli | proposta | 2026-10-27 | A 1200 px la colonna dei permessi sparisce |
 | Impostazione del binario `ssh` | proposta | 2026-10-27 | Default `/usr/bin/ssh`; serve per chi usa l'ssh di Homebrew |
 | Trascinare file dall'app al Finder | proposta | 2026-10-27 | Non supportato da Tauri: serve un plugin e, per i remoti, le file promise di macOS |

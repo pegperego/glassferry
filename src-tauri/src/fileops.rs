@@ -41,7 +41,7 @@ pub fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn join(dir: &str, name: &str) -> String {
+pub(crate) fn join(dir: &str, name: &str) -> String {
     if dir.ends_with('/') {
         format!("{dir}{name}")
     } else {
@@ -214,6 +214,18 @@ pub mod remote {
     }
 
     pub async fn delete(session: &Session, dir: &str, names: &[String]) -> Result<DeleteMethod> {
+        let paths = delete_paths(session, dir, names)?;
+        if delete_method(session) == DeleteMethod::Shell {
+            delete_shell(session, &paths).await?;
+            return Ok(DeleteMethod::Shell);
+        }
+        let steps = plan_sftp_delete(session, &paths).await?;
+        run_sftp_delete(session, &steps).await?;
+        Ok(DeleteMethod::Sftp)
+    }
+
+    /// Validated absolute paths of a remote delete.
+    pub fn delete_paths(session: &Session, dir: &str, names: &[String]) -> Result<Vec<String>> {
         let mut paths = Vec::with_capacity(names.len());
         for name in names {
             validate_name(name)?;
@@ -224,57 +236,106 @@ pub mod remote {
             }
             paths.push(path);
         }
-
-        if session.capabilities.commands.iter().any(|c| c == "rm") {
-            let args: Vec<&str> = paths.iter().map(String::as_str).collect();
-            let output = session
-                .launcher
-                .exec("rm -rf", &sh_command(r#"rm -rf -- "$@""#, &args))
-                .await?;
-            if output.status.success() {
-                return Ok(DeleteMethod::Shell);
-            }
-            return Err(AppError::Other(String::from_utf8_lossy(&output.stderr).trim().to_string()));
-        }
-
-        for path in &paths {
-            let mut op = log_op(session, "rm -r", path);
-            op.equivalent(session.launcher.sftp_equivalent("rm", &[path]));
-            let result = remove_tree(session, path).await;
-            op.result(result, |count| Some(format!("{count} elementi rimossi")))?;
-        }
-        Ok(DeleteMethod::Sftp)
+        Ok(paths)
     }
 
-    /// Depth-first removal over SFTP; symlinks are removed, never followed.
-    async fn remove_tree(session: &Session, root: &str) -> Result<u64> {
-        let mut fs = session.sftp.fs();
-        let meta = fs.symlink_metadata(root).await?;
-        if !meta.file_type().is_some_and(|t| t.is_dir()) {
-            fs.remove_file(root).await?;
-            return Ok(1);
+    pub fn delete_method(session: &Session) -> DeleteMethod {
+        if session.capabilities.commands.iter().any(|c| c == "rm") {
+            DeleteMethod::Shell
+        } else {
+            DeleteMethod::Sftp
         }
-        // (path, children already listed)
-        let mut stack: Vec<(String, bool)> = vec![(root.to_string(), false)];
-        let mut removed = 0;
-        while let Some((dir, expanded)) = stack.pop() {
-            if expanded {
-                fs.remove_dir(&dir).await?;
-                removed += 1;
+    }
+
+    /// The exact remote command line of a shell delete.
+    pub fn delete_command(paths: &[String]) -> String {
+        let args: Vec<&str> = paths.iter().map(String::as_str).collect();
+        sh_command(r#"rm -rf -- "$@""#, &args)
+    }
+
+    pub async fn delete_shell(session: &Session, paths: &[String]) -> Result<()> {
+        let output = session.launcher.exec("rm -rf", &delete_command(paths)).await?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(AppError::Other(String::from_utf8_lossy(&output.stderr).trim().to_string()))
+        }
+    }
+
+    /// One request of an SFTP delete.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum SftpStep {
+        RemoveFile(String),
+        RemoveDir(String),
+    }
+
+    impl SftpStep {
+        /// `sftp` batch syntax.
+        pub fn command(&self) -> String {
+            match self {
+                SftpStep::RemoveFile(p) => format!("rm {}", crate::log::sftp_quote(p)),
+                SftpStep::RemoveDir(p) => format!("rmdir {}", crate::log::sftp_quote(p)),
+            }
+        }
+    }
+
+    /// Lists, depth first, every request needed to delete `paths` (files and
+    /// symlinks before their directory). Symlinks are removed, never followed.
+    pub async fn plan_sftp_delete(session: &Session, paths: &[String]) -> Result<Vec<SftpStep>> {
+        let mut fs = session.sftp.fs();
+        let mut steps = Vec::new();
+        for root in paths {
+            let meta = fs.symlink_metadata(root).await?;
+            if !meta.file_type().is_some_and(|t| t.is_dir()) {
+                steps.push(SftpStep::RemoveFile(root.clone()));
                 continue;
             }
-            stack.push((dir.clone(), true));
-            for child in session.read_dir(Path::new(&dir)).await? {
-                let path = join(&dir, &child.name);
-                if child.kind == EntryKind::Dir {
-                    stack.push((path, false));
-                } else {
-                    fs.remove_file(&path).await?;
-                    removed += 1;
+            // (path, children already listed)
+            let mut stack: Vec<(String, bool)> = vec![(root.clone(), false)];
+            while let Some((dir, expanded)) = stack.pop() {
+                if expanded {
+                    steps.push(SftpStep::RemoveDir(dir));
+                    continue;
+                }
+                stack.push((dir.clone(), true));
+                for child in session.read_dir(Path::new(&dir)).await? {
+                    let path = join(&dir, &child.name);
+                    if child.kind == EntryKind::Dir {
+                        stack.push((path, false));
+                    } else {
+                        steps.push(SftpStep::RemoveFile(path));
+                    }
                 }
             }
         }
-        Ok(removed)
+        Ok(steps)
+    }
+
+    /// Runs exactly the planned requests: anything added meanwhile makes a
+    /// `rmdir` fail instead of being deleted unseen.
+    pub async fn run_sftp_delete(session: &Session, steps: &[SftpStep]) -> Result<()> {
+        let mut fs = session.sftp.fs();
+        let mut op = log_op(session, "rm -r", format!("{} richieste", steps.len()));
+        op.output(steps.iter().map(SftpStep::command).collect::<Vec<_>>().join("\n"));
+        let result = async {
+            for (done, step) in steps.iter().enumerate() {
+                let outcome = match step {
+                    SftpStep::RemoveFile(p) => fs.remove_file(p).await,
+                    SftpStep::RemoveDir(p) => fs.remove_dir(p).await,
+                };
+                outcome.map_err(|e| {
+                    AppError::Other(format!(
+                        "{}: {} ({done} di {} richieste eseguite)",
+                        step.command(),
+                        crate::error::sftp_message(&e),
+                        steps.len()
+                    ))
+                })?;
+            }
+            Ok(())
+        }
+        .await;
+        op.result(result, |_| Some(format!("{} elementi rimossi", steps.len())))
     }
 }
 

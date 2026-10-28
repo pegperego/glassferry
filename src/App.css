@@ -1425,3 +1425,65 @@ button.link {
     margin-right: auto;
   }
 }
+
+/* Confirmations with command preview; protected connections */
+
+.modal.protected-modal {
+  border-width: 2px;
+  border-top-width: 6px;
+}
+
+.protection-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.protection-banner.protected .small {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.command-details {
+  margin: 8px 0;
+}
+
+.command-details summary {
+  cursor: default;
+}
+
+.command-details p {
+  margin: 6px 0;
+}
+
+.command-preview {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.name-gate {
+  margin-top: 10px;
+}
+
+.name-gate input {
+  font-family: var(--mono);
+}
+
+.edit-dot.unconfirmed {
+  background: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.45;
+}

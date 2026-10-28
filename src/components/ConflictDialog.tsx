@@ -1,14 +1,20 @@
 import { useState } from "react";
 import type { ConflictAction, ConflictRequest } from "../api";
+import { confirmationMatches, type Protection } from "../connections";
 import { formatSize, formatTime } from "../format";
+import { CommandPreview, NameGate, ProtectionBanner } from "./Protection";
 
 interface Props {
   request: ConflictRequest;
+  /** Destination connection of an upload; overwriting needs the typed name when protected. */
+  protection: Protection | null;
   onAnswer: (action: ConflictAction, applyToAll: boolean) => void;
 }
 
-export function ConflictDialog({ request, onAnswer }: Props) {
+export function ConflictDialog({ request, protection, onAnswer }: Props) {
   const [applyToAll, setApplyToAll] = useState(false);
+  const [typed, setTyped] = useState("");
+  const canOverwrite = confirmationMatches(protection, typed);
   const where = request.direction === "upload" ? `su ${request.host}` : "in locale";
   const newer =
     request.srcModified !== null && request.dstModified !== null
@@ -21,7 +27,12 @@ export function ConflictDialog({ request, onAnswer }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <div className="modal" onKeyDown={(e) => e.key === "Escape" && onAnswer("cancel", false)}>
+      <div
+        className={protection?.protected ? "modal protected-modal" : "modal"}
+        style={protection?.protected && protection.category ? { borderColor: protection.category.color } : undefined}
+        onKeyDown={(e) => e.key === "Escape" && onAnswer("cancel", false)}
+      >
+        {protection && <ProtectionBanner protection={protection} />}
         <h2>Il file esiste già {where}</h2>
         <pre className="prompt">{request.path}</pre>
         <table className="conflict-table">
@@ -39,6 +50,8 @@ export function ConflictDialog({ request, onAnswer }: Props) {
           </tbody>
         </table>
         {newer && <p className="muted">{newer}</p>}
+        <CommandPreview lines={request.commands} open={protection?.protected ?? false} />
+        <NameGate protection={protection} value={typed} onChange={setTyped} />
         <label className="checkbox">
           <input type="checkbox" checked={applyToAll} onChange={(e) => setApplyToAll(e.target.checked)} />
           Applica a tutti i conflitti di questo trasferimento
@@ -46,8 +59,13 @@ export function ConflictDialog({ request, onAnswer }: Props) {
         <div className="actions">
           <button onClick={() => onAnswer("cancel", false)}>Annulla trasferimento</button>
           <button onClick={() => onAnswer("skip", applyToAll)}>Salta</button>
-          <button className="primary" autoFocus onClick={() => onAnswer("overwrite", applyToAll)}>
-            Sovrascrivi
+          <button
+            className={protection?.protected ? "primary danger" : "primary"}
+            autoFocus={!protection?.protected}
+            disabled={!canOverwrite}
+            onClick={() => onAnswer("overwrite", applyToAll)}
+          >
+            {applyToAll ? "Sovrascrivi tutti" : "Sovrascrivi"}
           </button>
         </div>
       </div>

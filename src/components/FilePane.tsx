@@ -10,14 +10,16 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { isDirLike, type DeleteMethod, type FileEntry } from "../api";
+import { isDirLike, type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
+import type { Protection } from "../connections";
 import { clickSelect, emptySelection, moveCursor, selectAll, toggleSort, type SortKey } from "../fileList";
 import { formatPermissions, formatSize, formatTime } from "../format";
 import { dragSourceSide, getDragPayload, setDragPayload, type DragPayload, type Side } from "../dnd";
 import { joinPath, parentPath, pathSegments } from "../paths";
 import type { PaneState } from "../usePane";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
-import { ConfirmDialog, PromptDialog, nameError } from "./Dialogs";
+import { PromptDialog, nameError } from "./Dialogs";
+import { PlanDialog } from "./PlanDialog";
 
 const ROW_HEIGHT = 24;
 const PAGE_ROWS = 20;
@@ -28,11 +30,14 @@ export interface PaneOps {
   mkdir: (dir: string, name: string) => Promise<void>;
   rename: (dir: string, from: string, to: string) => Promise<void>;
   move: (srcDir: string, names: string[], dstDir: string) => Promise<void>;
-  remove: (dir: string, names: string[]) => Promise<DeleteMethod>;
+  /** Previewed operations: deletes always, renames and moves on protected connections. */
+  plan: (request: PlanRequest) => Promise<PlanPreview>;
+  execute: (planId: number) => Promise<PlanOutcome>;
+  discard: (planId: number) => void;
   /** Deletes are permanent (remote) rather than moved to the Trash (local). */
   permanentDelete: boolean;
-  /** How a delete is carried out, shown in the confirmation. */
-  deleteHint: string;
+  /** Remote connection of the pane; null for the local pane. */
+  protection: Protection | null;
 }
 
 interface Props {
@@ -63,7 +68,19 @@ interface Props {
 type Dialog =
   | { kind: "mkdir" }
   | { kind: "move"; names: string[] }
-  | { kind: "delete"; names: string[] };
+  | {
+      kind: "plan";
+      request: PlanRequest;
+      title: string;
+      confirmLabel: string;
+      busyLabel: string;
+      danger: boolean;
+      /** Names listed above the preview. */
+      names: string[];
+      focus?: string;
+      preview: PlanPreview | null;
+      error: string | null;
+    };
 
 export function FilePane(props: Props) {
   const { pane, title, actions, info, color, active, onActivate, side, ops, transfer, onDropFiles, openFile } = props;
@@ -142,11 +159,55 @@ export function FilePane(props: Props) {
       listRef.current?.focus();
       return;
     }
-    void run("Rinomina…", () => ops.rename(path, from, to), to);
+    if (ops.protection?.protected) {
+      startPlan({ kind: "rename", dir: path, from, to }, {
+        title: `Rinominare ${from} in ${to}?`,
+        confirmLabel: "Rinomina",
+        busyLabel: "Rinomina…",
+        danger: false,
+        names: [],
+        focus: to,
+      });
+    } else void run("Rinomina…", () => ops.rename(path, from, to), to);
+  };
+
+  /** Moves within this side; previewed and confirmed on protected connections. */
+  const moveTo = (srcDir: string, moved: string[], dstDir: string) => {
+    if (ops.protection?.protected) {
+      startPlan({ kind: "move", srcDir, names: moved, dstDir }, {
+        title: `Spostare ${describe(moved)} in ${dstDir}?`,
+        confirmLabel: "Sposta",
+        busyLabel: "Spostamento…",
+        danger: false,
+        names: moved,
+      });
+    } else void run("Spostamento…", () => ops.move(srcDir, moved, dstDir));
+  };
+
+  type PlanMeta = Omit<Extract<Dialog, { kind: "plan" }>, "kind" | "request" | "preview" | "error">;
+  /** Opens the confirmation and fetches the preview of `request`. */
+  const startPlan = (request: PlanRequest, meta: PlanMeta) => {
+    setDialog({ kind: "plan", request, ...meta, preview: null, error: null });
+    ops.plan(request).then(
+      (preview) =>
+        setDialog((d) => {
+          if (d?.kind === "plan" && d.request === request) return { ...d, preview };
+          ops.discard(preview.id); // closed meanwhile
+          return d;
+        }),
+      (e) => setDialog((d) => (d?.kind === "plan" && d.request === request ? { ...d, error: String(e) } : d)),
+    );
   };
 
   const askDelete = (chosen: string[]) => {
-    if (chosen.length > 0) setDialog({ kind: "delete", names: chosen });
+    if (chosen.length === 0 || path === null) return;
+    startPlan({ kind: "delete", dir: path, names: chosen }, {
+      title: ops.permanentDelete ? `Eliminare ${describe(chosen)}?` : `Spostare ${describe(chosen)} nel Cestino?`,
+      confirmLabel: ops.permanentDelete ? "Elimina definitivamente" : "Sposta nel Cestino",
+      busyLabel: ops.permanentDelete ? "Eliminazione…" : "Spostamento nel Cestino…",
+      danger: ops.permanentDelete,
+      names: chosen,
+    });
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -215,7 +276,7 @@ export function FilePane(props: Props) {
     if (payload.side !== side) {
       if (acceptsFrom.includes(payload.side)) onDropFiles?.(payload, targetDir);
     } else if (entry && isDirLike(entry) && !payload.names.includes(entry.name) && payload.dir !== targetDir) {
-      void run("Spostamento…", () => ops.move(payload.dir, payload.names, targetDir));
+      moveTo(payload.dir, payload.names, targetDir);
     }
   };
 
@@ -428,30 +489,40 @@ export function FilePane(props: Props) {
           onCancel={() => setDialog(null)}
           onSubmit={(dst) => {
             setDialog(null);
-            void run("Spostamento…", () => ops.move(path, dialog.names, dst.replace(/(.)\/+$/, "$1")));
+            moveTo(path, dialog.names, dst.replace(/(.)\/+$/, "$1"));
           }}
         />
       )}
-      {dialog?.kind === "delete" && path !== null && (
-        <ConfirmDialog
-          title={ops.permanentDelete ? `Eliminare ${describe(dialog.names)}?` : `Spostare ${describe(dialog.names)} nel Cestino?`}
-          confirmLabel={ops.permanentDelete ? "Elimina definitivamente" : "Sposta nel Cestino"}
-          danger={ops.permanentDelete}
-          onCancel={() => setDialog(null)}
-          onConfirm={() => {
-            const chosen = dialog.names;
+      {dialog?.kind === "plan" && (
+        <PlanDialog
+          title={dialog.title}
+          preview={dialog.preview}
+          error={dialog.error}
+          protection={ops.protection}
+          confirmLabel={dialog.confirmLabel}
+          danger={dialog.danger}
+          onCancel={() => {
+            if (dialog.preview) ops.discard(dialog.preview.id);
             setDialog(null);
-            void run(ops.permanentDelete ? "Eliminazione…" : "Spostamento nel Cestino…", () => ops.remove(path, chosen));
+            listRef.current?.focus();
+          }}
+          onConfirm={() => {
+            const { preview, busyLabel, focus } = dialog;
+            setDialog(null);
+            if (preview) void run(busyLabel, () => ops.execute(preview.id), focus);
           }}
         >
-          <ul className="confirm-list">
-            {dialog.names.slice(0, CONFIRM_LIST_MAX).map((n) => (
-              <li key={n}>{n}</li>
-            ))}
-            {dialog.names.length > CONFIRM_LIST_MAX && <li className="muted">e altri {dialog.names.length - CONFIRM_LIST_MAX}…</li>}
-          </ul>
-          <p className={ops.permanentDelete ? "error-text small" : "muted small"}>{ops.deleteHint}</p>
-        </ConfirmDialog>
+          {dialog.names.length > 0 && (
+            <ul className="confirm-list">
+              {dialog.names.slice(0, CONFIRM_LIST_MAX).map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+              {dialog.names.length > CONFIRM_LIST_MAX && (
+                <li className="muted">e altri {dialog.names.length - CONFIRM_LIST_MAX}…</li>
+              )}
+            </ul>
+          )}
+        </PlanDialog>
       )}
     </section>
   );

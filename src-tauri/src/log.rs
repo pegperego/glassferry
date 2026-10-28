@@ -362,7 +362,7 @@ where
 }
 
 /// Quotes a path for an `sftp` batch command line.
-fn sftp_quote(path: &str) -> String {
+pub fn sftp_quote(path: &str) -> String {
     format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
 }
 

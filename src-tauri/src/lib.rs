@@ -6,6 +6,7 @@ pub mod error;
 pub mod fileops;
 pub mod local;
 pub mod log;
+pub mod plan;
 pub mod runtime_dir;
 pub mod session;
 pub mod ssh_config;
@@ -27,6 +28,7 @@ use log::{LogEntry, Logger};
 use session::{Capabilities, Session, SshLauncher};
 use edit::{ConflictChoice, EditEvent, EditInfo, EditManager};
 use fileops::{DeleteMethod, Target};
+use plan::{PlanOutcome, PlanPreview, PlanRequest, Planner};
 use ssh_config::HostEntry;
 use transfer::{ConflictAction, Direction, JobInfo, TransferEvent, TransferManager};
 
@@ -39,6 +41,7 @@ struct AppState {
     logger: Arc<Logger>,
     transfers: Arc<TransferManager>,
     edits: Arc<EditManager>,
+    planner: Arc<Planner>,
     connection_store: ConnectionStore,
     connections: Mutex<Store>,
     /// Problem met loading `connections.json`, shown once by the UI.
@@ -332,10 +335,40 @@ async fn fs_delete(state: State<'_, AppState>, target: Target, dir: String, name
     }
 }
 
+/// Prepares a delete, move or rename and returns its preview.
 #[tauri::command]
-async fn edit_open(state: State<'_, AppState>, session_id: u64, path: String) -> Result<EditInfo> {
+async fn fs_plan(state: State<'_, AppState>, target: Target, request: PlanRequest) -> Result<PlanPreview> {
+    let session = match target {
+        Target::Local => None,
+        Target::Remote { session_id } => Some(state.session(session_id)?),
+    };
+    state.planner.plan(&state.logger, target, session.as_deref(), request).await
+}
+
+/// Runs exactly the previewed plan (single use).
+#[tauri::command]
+async fn fs_plan_execute(state: State<'_, AppState>, id: u64) -> Result<PlanOutcome> {
+    let session = match state.planner.target(id)? {
+        Target::Local => None,
+        Target::Remote { session_id } => Some(state.session(session_id)?),
+    };
+    state.planner.execute(&state.logger, id, session.as_deref()).await
+}
+
+#[tauri::command]
+fn fs_plan_discard(state: State<'_, AppState>, id: u64) {
+    state.planner.discard(id);
+}
+
+#[tauri::command]
+async fn edit_open(state: State<'_, AppState>, session_id: u64, path: String, confirm_saves: bool) -> Result<EditInfo> {
     let session = state.session(session_id)?;
-    state.edits.open(session_id, session, path).await
+    state.edits.open(session_id, session, path, confirm_saves).await
+}
+
+#[tauri::command]
+fn edit_confirm_save(state: State<'_, AppState>, id: u64, allow: bool) -> Result<()> {
+    state.edits.confirm_save(id, allow)
 }
 
 #[tauri::command]
@@ -438,6 +471,7 @@ pub fn run() {
                     let _ = match event {
                         EditEvent::Update(info) => handle.emit("edit-update", info),
                         EditEvent::Conflict(conflict) => handle.emit("edit-conflict", conflict),
+                        EditEvent::ConfirmSave(confirm) => handle.emit("edit-confirm", confirm),
                     };
                 }),
             );
@@ -459,6 +493,7 @@ pub fn run() {
                 logger,
                 transfers,
                 edits,
+                planner: Planner::new(),
                 connection_store,
                 connections: Mutex::new(store),
                 connections_warning: Mutex::new(connections_warning),
@@ -494,10 +529,14 @@ pub fn run() {
             fs_rename,
             fs_move,
             fs_delete,
+            fs_plan,
+            fs_plan_execute,
+            fs_plan_discard,
             edit_open,
             edit_list,
             edit_close,
             edit_resolve,
+            edit_confirm_save,
             edit_reopen,
             edit_reveal,
             local_open

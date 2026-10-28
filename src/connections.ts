@@ -164,3 +164,22 @@ export function categoryInUse(store: Store, id: string): number {
 export function removeCategory(store: Store, id: string): Store {
   return { ...store, categories: store.categories.filter((c) => c.id !== id) };
 }
+
+/** Who a remote operation targets, for confirmations. */
+export interface Protection {
+  /** Connection name: what the user types to confirm. */
+  name: string;
+  category: Category | undefined;
+  /** Destructive operations need the stronger confirmation. */
+  protected: boolean;
+}
+
+export function protectionOf(store: Store | null, connection: Connection): Protection {
+  const category = store ? categoryOf(store, connection) : undefined;
+  return { name: connection.name, category, protected: category?.protected ?? false };
+}
+
+/** The typed confirmation is complete (always true without protection). */
+export function confirmationMatches(protection: Protection | null | undefined, typed: string): boolean {
+  return !protection?.protected || typed.trim() === protection.name.trim();
+}

@@ -9,6 +9,7 @@ const STATE_LABEL: Record<EditInfo["state"], string> = {
   uploading: "Caricamento…",
   conflict: "Conflitto: modifiche locali non caricate",
   error: "Errore",
+  unconfirmed: "Modifiche non caricate: caricamento non confermato",
 };
 
 interface Props {
@@ -61,6 +62,7 @@ export function EditsView({ edits, host, hostColor }: Props) {
               <button onClick={() => edits.resolve(edit.id, "reload")}>Usa versione del server</button>
             </>
           )}
+          {edit.state === "unconfirmed" && <button onClick={() => edits.upload(edit.id)}>Carica sul server</button>}
           <button onClick={() => edits.reopen(edit.id)}>Apri</button>
           <button title="Mostra la copia locale nel Finder" onClick={() => edits.reveal(edit.id)}>
             Mostra

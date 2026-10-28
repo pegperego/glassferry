@@ -1,6 +1,6 @@
 # Gestione connessioni e più pannelli remoti
 
-Analisi del 2026-10-27. Stato: fasi 1 e 2 implementate, fasi 3 e 4 da fare. Voci collegate in [`roadmap.md`](roadmap.md).
+Analisi del 2026-10-27. Stato: fasi 1, 2 e 3 implementate, fase 4 da fare. Voci collegate in [`roadmap.md`](roadmap.md).
 
 ## Obiettivi
 
@@ -139,6 +139,8 @@ Valgono per le connessioni delle categorie con `protected: true`. Il dialogo usa
 | Sposta / rinomina | sempre |
 | Upload e copia da server a server verso una connessione protetta | solo se sovrascrive; i file nuovi no |
 | Salvataggio di un file in modifica | al primo caricamento di ogni file aperto, con l'opzione "non chiedere più per questo file" |
+
+Note dall'implementazione: con un caricamento non confermato il file resta nello stato "non caricato"; "Carica sul server" nel tab File aperti chiede di nuovo la conferma. "Non chiedere più" vale per connessione e percorso, anche nelle aperture successive. Rinomina e spostamento senza protezione restano immediati, senza dialogo.
 
 ### Anteprima dei comandi
 

@@ -26,7 +26,7 @@ pub type Result<T> = std::result::Result<T, AppError>;
 
 /// Readable text for SFTP status errors; OpenSSH's sftp-server only sends
 /// generic messages ("Failure"), so the code is translated.
-fn sftp_message(error: &openssh_sftp_client::Error) -> String {
+pub(crate) fn sftp_message(error: &openssh_sftp_client::Error) -> String {
     use openssh_sftp_client::error::SftpErrorKind;
     match error {
         openssh_sftp_client::Error::SftpError(kind, msg) => {

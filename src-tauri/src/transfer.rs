@@ -100,6 +100,9 @@ pub struct ConflictRequest {
     pub direction: Direction,
     /// Destination path that already exists.
     pub path: String,
+    pub src: String,
+    /// How the overwrite is carried out, as commands (preview).
+    pub commands: Vec<String>,
     pub src_size: u64,
     pub src_modified: Option<u64>,
     pub dst_size: Option<u64>,
@@ -504,7 +507,7 @@ impl TransferManager {
             if is_dir {
                 return Err(AppError::Other("esiste già una cartella con lo stesso nome".into()));
             }
-            if !self.resolve_conflict(job, direction, file, dst, size, modified).await? {
+            if !self.resolve_conflict(job, direction, file, (src, dst), (size, modified)).await? {
                 return Ok(false);
             }
         }
@@ -539,9 +542,8 @@ impl TransferManager {
         job: &Arc<Job>,
         direction: Direction,
         file: &PlannedFile,
-        dst: &str,
-        dst_size: u64,
-        dst_modified: Option<u64>,
+        (src, dst): (&str, &str),
+        (dst_size, dst_modified): (u64, Option<u64>),
     ) -> Result<bool> {
         let mut policy = job.policy.lock().await;
         match *policy {
@@ -561,6 +563,8 @@ impl TransferManager {
             host: job.session.launcher.label.clone(),
             direction,
             path: dst.to_string(),
+            src: src.to_string(),
+            commands: overwrite_commands(&job.session, direction, src, dst),
             src_size: file.size,
             src_modified: file.modified,
             dst_size: Some(dst_size),
@@ -691,6 +695,28 @@ async fn scan_remote(job: &Job, src_dir: &str, names: &[String]) -> Result<Plan>
 }
 
 // ---- data transfer -----------------------------------------------------------
+
+/// The requests of an overwrite: copy to `.sfm-part`, then replace.
+fn overwrite_commands(session: &Session, direction: Direction, src: &str, dst: &str) -> Vec<String> {
+    use crate::log::sftp_quote as q;
+    let part = part_name(dst);
+    match direction {
+        Direction::Upload => {
+            let mut lines = vec![format!("sftp> put {} {}", q(src), q(&part))];
+            if session.sftp.support_posix_rename() {
+                lines.push(format!("sftp> rename {} {}   # posix-rename: sostituisce in un passo", q(&part), q(dst)));
+            } else {
+                lines.push(format!("sftp> rm {}", q(dst)));
+                lines.push(format!("sftp> rename {} {}", q(&part), q(dst)));
+            }
+            lines
+        }
+        Direction::Download => vec![
+            format!("sftp> get {} {}", q(src), q(&part)),
+            format!("mv -f {}", shell_line([&part, &dst.to_string()])),
+        ],
+    }
+}
 
 fn part_name(path: &str) -> String {
     format!("{path}{PART_SUFFIX}")

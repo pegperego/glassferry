@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Store } from "./api";
 import {
+  confirmationMatches,
   connectionErrors,
   emptyAppSource,
   groupByCategory,
@@ -9,6 +10,7 @@ import {
   newConnection,
   notImported,
   optionError,
+  protectionOf,
   searchConnections,
 } from "./connections";
 
@@ -78,5 +80,18 @@ describe("validation", () => {
     expect(optionError("ServerAliveInterval=30")).toBeNull();
     expect(optionError("Compression")).not.toBeNull();
     expect(optionError("match all")).toMatch(/non è ammessa/);
+  });
+});
+
+describe("protection", () => {
+  it("requires the exact connection name only on protected categories", () => {
+    const s = store();
+    const prod = protectionOf(s, s.connections[0]);
+    const dev = protectionOf(s, s.connections[1]);
+    expect([prod.protected, dev.protected]).toEqual([true, false]);
+    expect(confirmationMatches(prod, "web 10")).toBe(false);
+    expect(confirmationMatches(prod, " Web 10 ")).toBe(true);
+    expect(confirmationMatches(dev, "")).toBe(true);
+    expect(confirmationMatches(null, "")).toBe(true);
   });
 });

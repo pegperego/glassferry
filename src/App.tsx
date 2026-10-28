@@ -2,16 +2,17 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import {
   askpassRespond,
-  fsDelete,
   fsMkdir,
   fsMove,
+  fsPlan,
+  fsPlanDiscard,
+  fsPlanExecute,
   fsRename,
   localHome,
   localListDir,
   localOpen,
   onAskpassRequest,
   type AskpassRequest,
-  type ConnectResult,
   type Connection,
   type Direction,
   type JobInfo,
@@ -22,13 +23,14 @@ import { BottomPanel, type BottomTab } from "./components/BottomPanel";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { ConnectionManager } from "./components/ConnectionManager";
 import { ChooseDialog } from "./components/Dialogs";
+import { EditConfirmDialog } from "./components/EditConfirmDialog";
 import { EditConflictDialog } from "./components/EditConflictDialog";
 import { FilePane, type PaneOps } from "./components/FilePane";
 import { QuickConnect } from "./components/QuickConnect";
 import { RemotePane } from "./components/RemotePane";
 import { SplitView } from "./components/SplitView";
 import { Toolbar, type RemoteLayout } from "./components/Toolbar";
-import { categoryOf } from "./connections";
+import { categoryOf, protectionOf, type Protection } from "./connections";
 import { groupByParent, remoteSide, slotOf, type DragPayload, type Side } from "./dnd";
 import { usePersistentState } from "./settings";
 import { useActivityLog } from "./useActivityLog";
@@ -46,28 +48,20 @@ type Modal =
   | { kind: "replace"; connection: Connection; startPath?: string; only?: number }
   | null;
 
-function paneOps(target: Target, permanentDelete: boolean, deleteHint: string): PaneOps {
+function paneOps(target: Target, protection: Protection | null): PaneOps {
   return {
     mkdir: (dir, name) => fsMkdir(target, dir, name),
     rename: (dir, from, to) => fsRename(target, dir, from, to),
     move: (srcDir, names, dstDir) => fsMove(target, srcDir, names, dstDir),
-    remove: (dir, names) => fsDelete(target, dir, names),
-    permanentDelete,
-    deleteHint,
+    plan: (request) => fsPlan(target, request),
+    execute: (id) => fsPlanExecute(id),
+    discard: (id) => void fsPlanDiscard(id).catch(() => {}),
+    permanentDelete: target.kind === "remote",
+    protection,
   };
 }
 
-const localOps = paneOps({ kind: "local" }, false, "Potrai recuperarli dal Cestino.");
-
-function remoteOps(session: ConnectResult): PaneOps {
-  return paneOps(
-    { kind: "remote", sessionId: session.sessionId },
-    true,
-    session.capabilities.commands.includes("rm")
-      ? "L'eliminazione sul server è definitiva (rm -rf) e include tutto il contenuto delle cartelle."
-      : "L'eliminazione sul server è definitiva e include tutto il contenuto delle cartelle (visita ricorsiva via SFTP).",
-  );
-}
+const localOps = paneOps({ kind: "local" }, null);
 
 /** `dir` is `path` or inside it. */
 const within = (path: string | null, dir: string) =>
@@ -254,6 +248,12 @@ export default function App() {
     }));
   const defaultUpload = uploadTargets.find((t) => t.slot === lastRemote) ?? uploadTargets[0];
 
+  /** Protection of a host (connection name) shown in transfer and edit prompts. */
+  const hostProtection = (host: string): Protection | null => {
+    const connection = store?.connections.find((c) => c.name === host);
+    return connection ? protectionOf(store, connection) : null;
+  };
+
   const hostColor = (host: string) => {
     const connection = store?.connections.find((c) => c.name === host);
     return store && connection ? categoryOf(store, connection)?.color : undefined;
@@ -299,7 +299,7 @@ export default function App() {
         <RemotePane
           key={key}
           side={remoteSide(slot)}
-          ops={remoteOps(s.result)}
+          ops={paneOps({ kind: "remote", sessionId: s.result.sessionId }, protectionOf(store, s.connection))}
           connection={s.connection}
           name={paneName(slot)}
           category={store ? categoryOf(store, s.connection) : undefined}
@@ -316,7 +316,7 @@ export default function App() {
           openFile={{
             label: "Modifica",
             run: (path) => {
-              void edits.open(s.result.sessionId, path);
+              void edits.open(s.result.sessionId, path, protectionOf(store, s.connection).protected, s.connection.id);
               setPanelTab("edits");
               if (!panelOpen) setPanelOpen(true);
             },
@@ -464,15 +464,28 @@ export default function App() {
           </button>
         </div>
       )}
-      {!prompts[0] && edits.conflicts[0] && (
+      {!prompts[0] && edits.confirms[0] && (
+        <EditConfirmDialog
+          key={edits.confirms[0].id}
+          confirm={edits.confirms[0]}
+          protection={hostProtection(edits.confirms[0].host)}
+          onAnswer={(allow, remember) => edits.answerConfirm(edits.confirms[0].id, allow, remember)}
+        />
+      )}
+      {!prompts[0] && !edits.confirms[0] && edits.conflicts[0] && (
         <EditConflictDialog
           key={edits.conflicts[0].id}
           conflict={edits.conflicts[0]}
           onAnswer={(choice) => edits.resolve(edits.conflicts[0].id, choice)}
         />
       )}
-      {!prompts[0] && !edits.conflicts[0] && transfers.conflicts[0] && (
-        <ConflictDialog key={transfers.conflicts[0].id} request={transfers.conflicts[0]} onAnswer={transfers.answerConflict} />
+      {!prompts[0] && !edits.confirms[0] && !edits.conflicts[0] && transfers.conflicts[0] && (
+        <ConflictDialog
+          key={transfers.conflicts[0].id}
+          request={transfers.conflicts[0]}
+          protection={transfers.conflicts[0].direction === "upload" ? hostProtection(transfers.conflicts[0].host) : null}
+          onAnswer={transfers.answerConflict}
+        />
       )}
     </main>
   );

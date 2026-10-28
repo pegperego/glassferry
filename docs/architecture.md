@@ -109,7 +109,13 @@ L'app tiene un proprio elenco di connessioni, con nome e categoria colorata. Il 
   - Le opzioni libere passano da una validazione (`Host`, `Match` e `Include` sono rifiutate) e da `ssh -G` su un file temporaneo, così un'opzione sbagliata la segnala ssh.
 - **Password:** solo nel Portachiavi, una voce per connessione. L'askpass le usa una volta sola per connessione, quindi una password cambiata fa comparire il dialogo invece di andare in loop.
 
-## 11. Distribuzione
+## 11. Anteprima ed esecuzione: un solo piano
+
+Le operazioni distruttive passano da un piano (`plan.rs`): il backend decide come eseguirle (Cestino, `rm -rf` via shell, elenco delle richieste SFTP, rename) e il dialogo mostra esattamente quei comandi. All'esecuzione si esegue il piano mostrato, non uno ricalcolato.
+
+**Perché.** Un'anteprima costruita dal frontend potrebbe divergere da quello che fa il backend. Con il piano, l'anteprima non può mostrare una cosa diversa da quella eseguita. Per l'eliminazione via SFTP vale anche il contrario: i file comparsi dopo l'anteprima non vengono eliminati, perché la `rmdir` della loro cartella fallisce (verificato sul server di test).
+
+## 12. Distribuzione
 
 Fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` e di leggere `~/.ssh`. Build firmata e notarizzata, arm64 e x64 (in roadmap).
 

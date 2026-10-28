@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
-use sshfilemanager_lib::fileops::remote;
+use sshfilemanager_lib::fileops::{remote, Target};
+use sshfilemanager_lib::plan::{PlanMethod, PlanRequest, Planner};
 use sshfilemanager_lib::log::{Logger, Status};
 use sshfilemanager_lib::runtime_dir;
 use sshfilemanager_lib::session::{Session, SshLauncher};
@@ -87,6 +88,44 @@ fn main() {
         println!("delete method: {method:?}");
         check("recursive delete", method.is_ok() && !exists("tree") && !exists("nuova cartella"));
         check("symlink target untouched", std::fs::metadata("/etc/hosts").is_ok());
+
+        // Previewed plans: the preview lists what runs, and only that runs.
+        std::fs::create_dir_all(format!("{work}/plan/sub")).unwrap();
+        std::fs::write(format!("{work}/plan/sub/one.txt"), b"1").unwrap();
+        std::fs::write(format!("{work}/plan/two.txt"), b"2").unwrap();
+        let planner = Planner::new();
+        let target = Target::Remote { session_id: 1 };
+        let delete = PlanRequest::Delete { dir: work.clone(), names: vec!["plan".into()] };
+        let preview = planner.plan(&logger, target, Some(&session), delete.clone()).await.unwrap();
+        println!("plan: {:?} {} lines: {:?}", preview.method, preview.total, preview.lines);
+        let expected = if session.capabilities.commands.iter().any(|c| c == "rm") {
+            preview.method == PlanMethod::Shell && preview.lines[0].contains("rm -rf --")
+        } else {
+            // two files + two directories, deepest first
+            preview.method == PlanMethod::Sftp && preview.total == 4 && preview.lines.last().unwrap().contains("rmdir")
+        };
+        check("delete plan matches the account", expected);
+        if preview.method == PlanMethod::Sftp {
+            // A file appearing after the preview must not be deleted unseen.
+            std::fs::write(format!("{work}/plan/sub/late.txt"), b"late").unwrap();
+            let result = planner.execute(&logger, preview.id, Some(&session)).await;
+            check("sftp plan refuses unseen files", result.is_err() && exists("plan/sub/late.txt"));
+            std::fs::remove_file(format!("{work}/plan/sub/late.txt")).unwrap();
+            let preview = planner.plan(&logger, target, Some(&session), delete).await.unwrap();
+            check("re-planned delete runs", planner.execute(&logger, preview.id, Some(&session)).await.is_ok() && !exists("plan"));
+        } else {
+            check("shell plan runs", planner.execute(&logger, preview.id, Some(&session)).await.is_ok() && !exists("plan"));
+        }
+        std::fs::write(format!("{work}/r.txt"), b"r").unwrap();
+        let rename = PlanRequest::Rename { dir: work.clone(), from: "r.txt".into(), to: "s.txt".into() };
+        let preview = planner.plan(&logger, target, Some(&session), rename).await.unwrap();
+        check(
+            "rename plan runs once",
+            preview.lines[0].starts_with("sftp> rename")
+                && planner.execute(&logger, preview.id, Some(&session)).await.is_ok()
+                && exists("s.txt")
+                && planner.execute(&logger, preview.id, Some(&session)).await.is_err(),
+        );
 
         session.close().await;
         let _ = std::fs::remove_dir_all(&work);

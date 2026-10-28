@@ -184,6 +184,9 @@ export interface ConflictRequest {
   host: string;
   direction: Direction;
   path: string;
+  src: string;
+  /** How the overwrite is carried out (preview). */
+  commands: string[];
   srcSize: number;
   srcModified: number | null;
   dstSize: number | null;
@@ -233,7 +236,7 @@ export const fsMove = (target: Target, srcDir: string, names: string[], dstDir: 
 export const fsDelete = (target: Target, dir: string, names: string[]) =>
   invoke<DeleteMethod>("fs_delete", { target, dir, names });
 
-export type EditState = "synced" | "uploading" | "conflict" | "error";
+export type EditState = "synced" | "uploading" | "conflict" | "error" | "unconfirmed";
 
 export interface EditInfo {
   id: number;
@@ -259,7 +262,24 @@ export interface EditConflict {
 
 export type EditChoice = "overwrite" | "reload" | "keep";
 
-export const editOpen = (sessionId: number, path: string) => invoke<EditInfo>("edit_open", { sessionId, path });
+/** `confirmSaves`: the first upload waits for a confirmation (protected connection). */
+export const editOpen = (sessionId: number, path: string, confirmSaves: boolean) =>
+  invoke<EditInfo>("edit_open", { sessionId, path, confirmSaves });
+
+/** Confirmation asked before the first upload on a protected connection. */
+export interface EditConfirm {
+  id: number;
+  host: string;
+  remotePath: string;
+  size: number;
+  commands: string[];
+}
+
+/** Answers a pending confirmation; without one, `allow` uploads changes left unconfirmed. */
+export const editConfirmSave = (id: number, allow: boolean) => invoke<void>("edit_confirm_save", { id, allow });
+
+export const onEditConfirm = (handler: (confirm: EditConfirm) => void): Promise<UnlistenFn> =>
+  listen<EditConfirm>("edit-confirm", (event) => handler(event.payload));
 export const editList = () => invoke<EditInfo[]>("edit_list");
 export const editClose = (id: number) => invoke<void>("edit_close", { id });
 export const editResolve = (id: number, choice: EditChoice) => invoke<void>("edit_resolve", { id, choice });
@@ -275,3 +295,31 @@ export const onEditConflict = (handler: (conflict: EditConflict) => void): Promi
 
 export const isDirLike = (entry: FileEntry) =>
   entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
+
+/** A previewed delete, move or rename (see src-tauri/src/plan.rs). */
+export type PlanRequest =
+  | { kind: "delete"; dir: string; names: string[] }
+  | { kind: "move"; srcDir: string; names: string[]; dstDir: string }
+  | { kind: "rename"; dir: string; from: string; to: string };
+
+export type PlanMethod = "trash" | "shell" | "sftp" | "localRename" | "sftpRename";
+
+export interface PlanPreview {
+  id: number;
+  method: PlanMethod;
+  explanation: string;
+  /** Commands as they will run (first 20). */
+  lines: string[];
+  /** Lines not shown (all of them are in the activity log). */
+  more: number;
+  total: number;
+}
+
+export type PlanOutcome = "done" | { deleted: { method: DeleteMethod } };
+
+export const fsPlan = (target: Target, request: PlanRequest) => invoke<PlanPreview>("fs_plan", { target, request });
+
+/** Runs exactly the previewed plan (single use). */
+export const fsPlanExecute = (id: number) => invoke<PlanOutcome>("fs_plan_execute", { id });
+
+export const fsPlanDiscard = (id: number) => invoke<void>("fs_plan_discard", { id });

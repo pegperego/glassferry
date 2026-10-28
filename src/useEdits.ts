@@ -1,24 +1,35 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   editClose,
+  editConfirmSave,
   editList,
   editOpen,
   editReopen,
   editResolve,
   editReveal,
+  onEditConfirm,
   onEditConflict,
   onEditUpdate,
   type EditChoice,
+  type EditConfirm,
   type EditConflict,
   type EditInfo,
 } from "./api";
+import { usePersistentState } from "./settings";
 
 export interface Edits {
   edits: EditInfo[];
   /** Files with local changes not on the server. */
   unsyncedCount: number;
   conflicts: EditConflict[];
-  open: (sessionId: number, path: string) => Promise<void>;
+  /** Upload confirmations pending (protected connections). */
+  confirms: EditConfirm[];
+  /** `confirmSaves`: protected connection; skipped for files the user said not to ask again. */
+  open: (sessionId: number, path: string, confirmSaves: boolean, connectionId: string) => Promise<void>;
+  /** `remember`: never ask again for this connection and path. */
+  answerConfirm: (id: number, allow: boolean, remember: boolean) => void;
+  /** Uploads changes left unconfirmed. */
+  upload: (id: number) => void;
   close: (id: number) => void;
   reopen: (id: number) => void;
   reveal: (id: number) => void;
@@ -30,6 +41,11 @@ export interface Edits {
 export function useEdits(onError: (message: string) => void): Edits {
   const [edits, setEdits] = useState<Map<number, EditInfo>>(new Map());
   const [conflicts, setConflicts] = useState<EditConflict[]>([]);
+  const [confirms, setConfirms] = useState<EditConfirm[]>([]);
+  /** "connectionId:path" of files whose uploads are not confirmed any more. */
+  const [noConfirm, setNoConfirm] = usePersistentState<string[]>("edits.noConfirm", []);
+  /** Edit id → "connectionId:path", to remember an answer. */
+  const keys = useRef(new Map<number, string>());
 
   const upsert = useCallback((info: EditInfo) => {
     setEdits((current) => new Map(current).set(info.id, info));
@@ -40,10 +56,14 @@ export function useEdits(onError: (message: string) => void): Edits {
     const unlistenConflict = onEditConflict((conflict) =>
       setConflicts((queue) => (queue.some((c) => c.id === conflict.id) ? queue : [...queue, conflict])),
     );
+    const unlistenConfirm = onEditConfirm((confirm) =>
+      setConfirms((queue) => (queue.some((c) => c.id === confirm.id) ? queue : [...queue, confirm])),
+    );
     void editList().then((list) => list.forEach(upsert));
     return () => {
       void unlistenUpdate.then((fn) => fn());
       void unlistenConflict.then((fn) => fn());
+      void unlistenConfirm.then((fn) => fn());
     };
   }, [upsert]);
 
@@ -54,13 +74,24 @@ export function useEdits(onError: (message: string) => void): Edits {
     edits: list,
     unsyncedCount: list.filter((e) => e.state !== "synced").length,
     conflicts,
-    open: async (sessionId, path) => {
+    confirms,
+    open: async (sessionId, path, confirmSaves, connectionId) => {
+      const key = `${connectionId}:${path}`;
       try {
-        upsert(await editOpen(sessionId, path));
+        const info = await editOpen(sessionId, path, confirmSaves && !noConfirm.includes(key));
+        keys.current.set(info.id, key);
+        upsert(info);
       } catch (e) {
         onError(String(e));
       }
     },
+    answerConfirm: (id, allow, remember) => {
+      setConfirms((queue) => queue.filter((c) => c.id !== id));
+      const key = keys.current.get(id);
+      if (allow && remember && key && !noConfirm.includes(key)) setNoConfirm([...noConfirm, key]);
+      report(editConfirmSave(id, allow));
+    },
+    upload: (id) => report(editConfirmSave(id, true)),
     close: (id) => {
       report(editClose(id));
       setEdits((current) => {
@@ -69,6 +100,7 @@ export function useEdits(onError: (message: string) => void): Edits {
         return next;
       });
       setConflicts((queue) => queue.filter((c) => c.id !== id));
+      setConfirms((queue) => queue.filter((c) => c.id !== id));
     },
     reopen: (id) => report(editReopen(id)),
     reveal: (id) => report(editReveal(id)),
@@ -79,6 +111,7 @@ export function useEdits(onError: (message: string) => void): Edits {
     dropSession: (sessionId) => {
       setEdits((current) => new Map([...current].filter(([, e]) => e.sessionId !== sessionId)));
       setConflicts([]);
+      setConfirms([]);
     },
   };
 }

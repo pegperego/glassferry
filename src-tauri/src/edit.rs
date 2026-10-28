@@ -9,6 +9,9 @@
 //!
 //! Uploads write the file in place (truncate + write) so owner and mode are
 //! preserved; the trade-off is that a dropped connection can leave it partial.
+//!
+//! On protected connections (`confirm_saves`), the first upload of each open
+//! file waits for an explicit confirmation (`edit-confirm` event).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -38,6 +41,8 @@ pub enum EditState {
     Conflict,
     /// Last upload failed; the next save retries.
     Error,
+    /// The upload was not confirmed (protected connection): local changes only.
+    Unconfirmed,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -78,9 +83,22 @@ pub enum ConflictChoice {
     Keep,
 }
 
+/// Confirmation asked before the first upload on a protected connection.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditConfirm {
+    pub id: u64,
+    pub host: String,
+    pub remote_path: String,
+    pub size: u64,
+    /// How the upload is carried out (preview).
+    pub commands: Vec<String>,
+}
+
 pub enum EditEvent {
     Update(EditInfo),
     Conflict(EditConflict),
+    ConfirmSave(EditConfirm),
 }
 
 type Sink = Arc<dyn Fn(EditEvent) + Send + Sync>;
@@ -101,6 +119,9 @@ struct Edit {
     /// Hash of the local content last uploaded or downloaded.
     synced_hash: Mutex<String>,
     conflict_reply: Mutex<Option<oneshot::Sender<ConflictChoice>>>,
+    /// The next upload needs a confirmation (protected connection, not confirmed yet).
+    confirm_saves: AtomicBool,
+    confirm_reply: Mutex<Option<oneshot::Sender<bool>>>,
     /// Dropping the watcher stops it.
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
@@ -172,7 +193,14 @@ impl EditManager {
 
     /// Downloads `remote_path`, opens it with the default application and
     /// starts watching it. Opening the same file twice reuses the copy.
-    pub async fn open(self: &Arc<Self>, session_id: u64, session: Arc<Session>, remote_path: String) -> Result<EditInfo> {
+    /// `confirm_saves`: ask before the first upload (protected connection).
+    pub async fn open(
+        self: &Arc<Self>,
+        session_id: u64,
+        session: Arc<Session>,
+        remote_path: String,
+        confirm_saves: bool,
+    ) -> Result<EditInfo> {
         let existing = self
             .edits
             .lock()
@@ -219,6 +247,8 @@ impl EditManager {
             remote: Mutex::new(remote),
             synced_hash: Mutex::new(sha256_hex(&content)),
             conflict_reply: Mutex::new(None),
+            confirm_saves: AtomicBool::new(confirm_saves),
+            confirm_reply: Mutex::new(None),
             watcher: Mutex::new(None),
         });
 
@@ -295,6 +325,17 @@ impl EditManager {
             }
         }
 
+        if edit.confirm_saves.load(Ordering::Relaxed) {
+            if !self.ask_confirm(edit, content.len() as u64).await {
+                return self.set_state(
+                    edit,
+                    EditState::Unconfirmed,
+                    Some("caricamento non confermato: le modifiche sono solo nella copia locale".into()),
+                );
+            }
+            edit.confirm_saves.store(false, Ordering::Relaxed);
+        }
+
         self.set_state(edit, EditState::Uploading, None);
         match upload(&edit.session, &remote_path, &content).await {
             Ok(mut state) => {
@@ -312,6 +353,40 @@ impl EditManager {
             }
             Err(e) => self.set_state(edit, EditState::Error, Some(e.to_string())),
         }
+    }
+
+    async fn ask_confirm(&self, edit: &Arc<Edit>, size: u64) -> bool {
+        let (tx, rx) = oneshot::channel();
+        *edit.confirm_reply.lock().unwrap() = Some(tx);
+        let info = edit.info.lock().unwrap().clone();
+        let commands = vec![format!(
+            "sftp> put {} {}   # scrittura diretta: mantiene proprietario e permessi",
+            crate::log::sftp_quote(&info.local_path),
+            crate::log::sftp_quote(&info.remote_path)
+        )];
+        (self.sink)(EditEvent::ConfirmSave(EditConfirm {
+            id: info.id,
+            host: info.host,
+            remote_path: info.remote_path,
+            size,
+            commands,
+        }));
+        rx.await.unwrap_or(false)
+    }
+
+    /// Answers a pending upload confirmation; without one, `allow` retries
+    /// the upload of changes left unconfirmed (which asks again).
+    pub fn confirm_save(self: &Arc<Self>, id: u64, allow: bool) -> Result<()> {
+        let edit = self.get(id)?;
+        if let Some(tx) = edit.confirm_reply.lock().unwrap().take() {
+            let _ = tx.send(allow);
+            return Ok(());
+        }
+        if allow {
+            let manager = self.clone();
+            tauri::async_runtime::spawn(async move { manager.sync(&edit).await });
+        }
+        Ok(())
     }
 
     async fn ask_conflict(&self, edit: &Arc<Edit>, opened: &RemoteState, current: &RemoteState) -> ConflictChoice {
@@ -402,6 +477,9 @@ impl EditManager {
         edit.watcher.lock().unwrap().take();
         if let Some(tx) = edit.conflict_reply.lock().unwrap().take() {
             let _ = tx.send(ConflictChoice::Keep);
+        }
+        if let Some(tx) = edit.confirm_reply.lock().unwrap().take() {
+            let _ = tx.send(false);
         }
         if let Some(dir) = Path::new(&edit.info.lock().unwrap().local_path).parent() {
             let _ = std::fs::remove_dir_all(dir);

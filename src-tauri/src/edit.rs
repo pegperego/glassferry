@@ -7,8 +7,11 @@
 //! that was opened (size, mtime and, when the server has `sha256sum`, the
 //! content hash): if someone else changed it, the user decides.
 //!
-//! Uploads write the file in place (truncate + write) so owner and mode are
-//! preserved; the trade-off is that a dropped connection can leave it partial.
+//! Uploads write `<name>.gf-part` and rename it over the file (posix-rename,
+//! one step), so a dropped connection never leaves it partial; the mode is
+//! copied. When replacing would lose something visible over SFTP (the path
+//! is a symlink, owner or group would change, no posix-rename, the folder is
+//! not writable) the file is written in place (truncate + write) instead.
 //!
 //! On protected connections (`confirm_saves`), the first upload of each open
 //! file waits for an explicit confirmation (`edit-confirm` event).
@@ -27,6 +30,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use openssh_sftp_client::metadata::MetaDataBuilder;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{AppError, Result};
@@ -507,11 +511,15 @@ impl EditManager {
         let (tx, rx) = oneshot::channel();
         *edit.confirm_reply.lock().unwrap() = Some(tx);
         let info = edit.info.lock().unwrap().clone();
-        let commands = vec![format!(
-            "sftp> put {} {}   # scrittura diretta: mantiene proprietario e permessi",
-            crate::log::sftp_quote(&info.local_path),
-            crate::log::sftp_quote(&info.remote_path)
-        )];
+        let (local, remote) = (crate::log::sftp_quote(&info.local_path), crate::log::sftp_quote(&info.remote_path));
+        let part = crate::log::sftp_quote(&crate::transfer::part_name(&info.remote_path));
+        let commands = vec![
+            format!("sftp> put {local} {part}   # stessi permessi del file"),
+            format!("sftp> rename {part} {remote}   # posix-rename: sostituisce in un passo"),
+            format!(
+                "# se è un link, se proprietario o gruppo cambierebbero o manca posix-rename: sftp> put {local} {remote}   # scrittura diretta"
+            ),
+        ];
         (self.sink)(EditEvent::ConfirmSave(EditConfirm {
             id: info.id,
             host: info.host,
@@ -793,15 +801,67 @@ async fn download(session: &Session, path: &str) -> Result<(Vec<u8>, RemoteState
 
 async fn upload(session: &Session, path: &str, content: &[u8]) -> Result<RemoteState> {
     let mut op = session.launcher.log(Channel::Sftp, "edit-save", path);
-    op.equivalent(session.launcher.sftp_equivalent("put", &["<copia locale>", path]));
+    let part = crate::transfer::part_name(path);
     let result = async {
-        let mut file = session.sftp.options().write(true).create(true).truncate(true).open(path).await?;
-        file.write_all(content).await?;
-        file.close().await?;
-        remote_state(session, path, false).await
+        let in_place = write_replacing(session, path, &part, content).await?;
+        if in_place.is_some() {
+            let mut file = session.sftp.options().write(true).create(true).truncate(true).open(path).await?;
+            file.write_all(content).await?;
+            file.close().await?;
+        }
+        Ok((remote_state(session, path, false).await?, in_place))
     }
     .await;
-    op.result(result, |_| Some(crate::transfer::format_bytes(content.len() as u64)))
+    let size = crate::transfer::format_bytes(content.len() as u64);
+    match &result {
+        Ok((_, Some(_))) | Err(_) => op.equivalent(session.launcher.sftp_equivalent("put", &["<copia locale>", path])),
+        Ok((_, None)) => op.equivalent(session.launcher.sftp_equivalent("put", &["<copia locale>", &part])),
+    };
+    op.result(result, |(_, in_place)| {
+        Some(match in_place {
+            None => format!("{size}, sostituito con posix-rename"),
+            Some(reason) => format!("{size}, scrittura diretta: {reason}"),
+        })
+    })
+    .map(|(state, _)| state)
+}
+
+/// Writes `part` with the file's mode and renames it over `path` in one step.
+/// `Ok(Some(reason))`: replacing would lose something, the server is
+/// unchanged and the caller writes in place. `Err`: the original is intact,
+/// the part file removed.
+async fn write_replacing(session: &Session, path: &str, part: &str, content: &[u8]) -> Result<Option<String>> {
+    if !session.sftp.support_posix_rename() {
+        return Ok(Some("il server non ha posix-rename".into()));
+    }
+    let mut fs = session.sftp.fs();
+    let original = fs.symlink_metadata(path).await?;
+    if original.file_type().is_some_and(|t| t.is_symlink()) {
+        return Ok(Some("è un link simbolico".into()));
+    }
+    let Ok(mut file) = session.sftp.options().write(true).create(true).truncate(true).open(part).await else {
+        return Ok(Some("impossibile creare il file temporaneo nella cartella".into()));
+    };
+    let result: Result<Option<String>> = async {
+        // Mode first: the content is never readable with wider permissions.
+        if let Some(permissions) = original.permissions() {
+            fs.set_metadata(part, MetaDataBuilder::new().permissions(permissions).create()).await?;
+        }
+        let created = fs.metadata(part).await?;
+        if created.uid() != original.uid() || created.gid() != original.gid() {
+            file.close().await?;
+            return Ok(Some("proprietario o gruppo cambierebbero".into()));
+        }
+        file.write_all(content).await?;
+        file.close().await?;
+        fs.rename(part, path).await?;
+        Ok(None)
+    }
+    .await;
+    if !matches!(result, Ok(None)) {
+        let _ = fs.remove_file(part).await;
+    }
+    result
 }
 
 // ---- helpers -------------------------------------------------------------------

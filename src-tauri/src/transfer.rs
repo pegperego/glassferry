@@ -789,7 +789,7 @@ fn overwrite_commands(job: &Job, direction: Direction, src: &str, dst: &str) -> 
     }
 }
 
-fn part_name(path: &str) -> String {
+pub(crate) fn part_name(path: &str) -> String {
     format!("{path}{PART_SUFFIX}")
 }
 

@@ -238,6 +238,65 @@ fn main() {
             restarted.list().is_empty() && !local.exists() && !work.join("cache/edits.json").exists(),
         );
 
+        // Saves replace the file in one step (new inode, no partial file if
+        // the connection drops), keeping its mode.
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let remote_path = remote.to_string_lossy().into_owned();
+        std::fs::set_permissions(&remote, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let inode = std::fs::metadata(&remote).unwrap().ino();
+        let info = restarted.open("conn2", 3, session.clone(), remote_path.clone(), false).await.unwrap();
+        std::fs::write(&info.local_path, "server { listen 13; }\n").unwrap();
+        settle().await;
+        let meta = std::fs::metadata(&remote).unwrap();
+        check(
+            "save replaces the file in one step, keeping its mode",
+            std::fs::read_to_string(&remote).unwrap().contains("listen 13;")
+                && meta.ino() != inode
+                && meta.mode() & 0o777 == 0o640
+                && !work.join("remote/nginx.conf.gf-part").exists(),
+        );
+        restarted.close(info.id);
+
+        // A symlink is written in place: the link stays, the target changes.
+        let link = work.join("remote/link.conf");
+        std::os::unix::fs::symlink(&remote, &link).unwrap();
+        let info = restarted.open("conn2", 3, session.clone(), link.to_string_lossy().into_owned(), false).await.unwrap();
+        std::fs::write(&info.local_path, "server { listen 14; }\n").unwrap();
+        settle().await;
+        check(
+            "symlink stays a link, its target is updated",
+            std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink()
+                && std::fs::read_to_string(&remote).unwrap().contains("listen 14;"),
+        );
+        restarted.close(info.id);
+
+        // A group the new file would not get: written in place, group kept.
+        let new_file_gid = {
+            let probe = work.join("remote/.gid-probe");
+            std::fs::write(&probe, "").unwrap();
+            let gid = std::fs::metadata(&probe).unwrap().gid();
+            std::fs::remove_file(&probe).unwrap();
+            gid
+        };
+        match secondary_groups().into_iter().find(|g| *g != new_file_gid) {
+            Some(gid) => {
+                std::os::unix::fs::chown(&remote, None, Some(gid)).unwrap();
+                let inode = std::fs::metadata(&remote).unwrap().ino();
+                let info = restarted.open("conn2", 3, session.clone(), remote_path.clone(), false).await.unwrap();
+                std::fs::write(&info.local_path, "server { listen 15; }\n").unwrap();
+                settle().await;
+                let meta = std::fs::metadata(&remote).unwrap();
+                check(
+                    "a group the new file would not get: written in place",
+                    std::fs::read_to_string(&remote).unwrap().contains("listen 15;")
+                        && meta.gid() == gid
+                        && meta.ino() == inode,
+                );
+                restarted.close(info.id);
+            }
+            None => println!("SKIP group check: the user has no other group"),
+        }
+
         match Arc::try_unwrap(session) {
             Ok(s) => s.close().await,
             Err(s) => s.launcher.stop_master().await,
@@ -245,4 +304,12 @@ fn main() {
         let _ = std::fs::remove_dir_all(&work);
         tokio::time::sleep(Duration::from_millis(200)).await;
     });
+}
+
+/// Groups of the current user (`getgroups`).
+fn secondary_groups() -> Vec<u32> {
+    let mut groups = vec![0 as libc::gid_t; 64];
+    let n = unsafe { libc::getgroups(groups.len() as libc::c_int, groups.as_mut_ptr()) };
+    groups.truncate(n.max(0) as usize);
+    groups
 }

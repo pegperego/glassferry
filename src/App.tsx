@@ -22,6 +22,7 @@ import { AskpassDialog } from "./components/AskpassDialog";
 import { BottomPanel, type BottomTab } from "./components/BottomPanel";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { ConnectionManager } from "./components/ConnectionManager";
+import { DragGhost } from "./components/DragGhost";
 import { ChooseDialog } from "./components/Dialogs";
 import { EditConfirmDialog } from "./components/EditConfirmDialog";
 import { EditConflictDialog } from "./components/EditConflictDialog";
@@ -474,6 +475,7 @@ export default function App() {
           </p>
         </ChooseDialog>
       )}
+      <DragGhost />
       {prompts[0] && <AskpassDialog request={prompts[0]} onAnswer={answerPrompt} />}
       {connections.warning && (
         <div className="toast error-toast" role="alert">

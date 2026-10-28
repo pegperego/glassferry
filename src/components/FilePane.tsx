@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -14,7 +13,8 @@ import { isDirLike, type FileEntry, type PlanOutcome, type PlanPreview, type Pla
 import type { Protection } from "../connections";
 import { clickSelect, emptySelection, moveCursor, selectAll, toggleSort, type SortKey } from "../fileList";
 import { formatPermissions, formatSize, formatTime } from "../format";
-import { dragSourceSide, getDragPayload, setDragPayload, type DragPayload, type Side } from "../dnd";
+import type { DragPayload, Side } from "../dnd";
+import { beginPointerDrag, registerDropZone, useDragState, type DropZone } from "../pointerDrag";
 import { joinPath, parentPath, pathSegments } from "../paths";
 import type { PaneState } from "../usePane";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
@@ -91,7 +91,8 @@ export function FilePane(props: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const names = useMemo(() => visible.map((e) => e.name), [visible]);
   /** Drop target while dragging: a folder row name, "" for the pane itself. */
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const drag = useDragState();
+  const dropTarget = drag?.target?.side === side ? (drag.target.entry ?? "") : null;
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Context menu; with `targets`, the ⇧F5 menu of copy destinations for those names. */
   const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry | null; targets?: string[] } | null>(null);
@@ -246,39 +247,43 @@ export function FilePane(props: Props) {
 
   // ---- drag & drop: other pane = copy, folder in this pane = move ----
 
-  const onDragStart = (e: DragEvent, entry: FileEntry) => {
-    if (path === null || renaming !== null) return;
+  const dragPayload = (entry: FileEntry): DragPayload | null => {
+    if (path === null || renaming !== null) return null;
     // Dragging an unselected row drags just that row, like the Finder.
     const dragged = selection.selected.has(entry.name) ? names.filter((n) => selection.selected.has(n)) : [entry.name];
-    setDragPayload(e.dataTransfer, { side, dir: path, names: dragged });
-    e.dataTransfer.effectAllowed = "copyMove";
+    return { side, dir: path, names: dragged };
   };
 
-  const onDragOver = (e: DragEvent, entry?: FileEntry) => {
-    const source = dragSourceSide(e.dataTransfer);
-    if (source === null) return;
-    const intoFolder = entry !== undefined && isDirLike(entry);
-    if (source === side && !intoFolder) return;
-    if (source !== side && (!onDropFiles || !acceptsFrom.includes(source))) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = source === side ? "move" : "copy";
-    setDropTarget(intoFolder ? entry.name : "");
+  const folderPath = (entry: string | null) => {
+    const found = entry === null ? undefined : visible.find((v) => v.name === entry);
+    return found && isDirLike(found) && path !== null ? joinPath(path, found.name) : null;
   };
 
-  const onDrop = (e: DragEvent, entry?: FileEntry) => {
-    setDropTarget(null);
-    const payload = getDragPayload(e.dataTransfer);
-    if (!payload || path === null) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const targetDir = entry && isDirLike(entry) ? joinPath(path, entry.name) : path;
-    if (payload.side !== side) {
-      if (acceptsFrom.includes(payload.side)) onDropFiles?.(payload, targetDir);
-    } else if (entry && isDirLike(entry) && !payload.names.includes(entry.name) && payload.dir !== targetDir) {
-      moveTo(payload.dir, payload.names, targetDir);
-    }
+  const zone: DropZone = {
+    accepts: (payload, entry) => {
+      if (path === null) return false;
+      const folder = folderPath(entry);
+      if (payload.side === side) return folder !== null && !payload.names.includes(entry!) && payload.dir !== folder;
+      return onDropFiles !== undefined && acceptsFrom.includes(payload.side);
+    },
+    drop: (payload, entry) => {
+      if (path === null) return;
+      const targetDir = folderPath(entry) ?? path;
+      if (payload.side !== side) onDropFiles?.(payload, targetDir);
+      else moveTo(payload.dir, payload.names, targetDir);
+    },
   };
+  // The registered zone always calls the latest render's handlers.
+  const zoneRef = useRef(zone);
+  zoneRef.current = zone;
+  useEffect(
+    () =>
+      registerDropZone(side, {
+        accepts: (payload, entry) => zoneRef.current.accepts(payload, entry),
+        drop: (payload, entry) => zoneRef.current.drop(payload, entry),
+      }),
+    [side],
+  );
 
   // ---- context menu ----
 
@@ -387,11 +392,6 @@ export function FilePane(props: Props) {
         className={dropTarget === "" ? "file-list drop-target" : "file-list"}
         tabIndex={0}
         onKeyDown={onKeyDown}
-        onDragOver={(e) => onDragOver(e)}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
-        }}
-        onDrop={(e) => onDrop(e)}
         onContextMenu={(e) => onContextMenu(e, null)}
       >
         <div className="file-row file-head">
@@ -420,10 +420,11 @@ export function FilePane(props: Props) {
                   }
                   onDoubleClick={() => open(entry)}
                   onContextMenu={(e) => onContextMenu(e, entry)}
-                  draggable={path !== null && renaming !== entry.name}
-                  onDragStart={(e) => onDragStart(e, entry)}
-                  onDragOver={(e) => onDragOver(e, entry)}
-                  onDrop={(e) => onDrop(e, entry)}
+                  data-entry={entry.name}
+                  data-dir={isDirLike(entry) ? "1" : undefined}
+                  onPointerDown={(e) => {
+                    if (renaming !== entry.name) beginPointerDrag(e, () => dragPayload(entry));
+                  }}
                 >
                   <span className="col-name" title={entry.name}>
                     <span className="icon">{icon(entry)}</span>

@@ -35,7 +35,7 @@ Remote → remote copies (`Direction::Remote`, `transfer_start(..., dstSessionId
 
 Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" sfm-slow segreta <work-dir>` (`sfm-slow` adds 20 ms each way through `scripts/delay-relay.py`). Reference: ~17 MiB/s pipelined vs ~5 MiB/s sequential; OpenSSH `sftp` ~22 MiB/s on the same path.
 
-UI triggers: button Carica/Scarica and F5 in the active pane (from the local pane: the remote pane used last; ⇧F5 and the context menu list every destination), drag & drop between any two panes (onto a folder row = into that folder; between remote panes it copies, never moves; ⇧F5 in a remote pane offers "Copia su <altro>"), files dropped from the Finder on a remote pane (Tauri `onDragDropEvent`, pane found through `data-pane`). Progress is shown in the bottom panel's Trasferimenti tab, with the host's category color and a host filter.
+UI triggers: button Carica/Scarica and F5 in the active pane (from the local pane: the remote pane used last; ⇧F5 and the context menu list every destination), drag & drop between any two panes (onto a folder row = into that folder; between remote panes it copies, never moves; ⇧F5 in a remote pane offers "Copia su <altro>"), files dropped from the Finder on a remote pane (Tauri `onDragDropEvent`, pane found through `data-pane`). Pane-to-pane drags do NOT use HTML5 drag & drop: in the native macOS window Tauri's drag-drop handler claims every drag, so `dragover`/`drop` never reach the page (it works in Chromium, which hides the bug). `pointerDrag.ts` tracks the pointer instead (`beginPointerDrag` on row `onPointerDown`, drop zones registered per pane, hit test via `data-pane` / `data-entry` / `data-dir`, `DragGhost` label). Playwright checks must drag with `page.mouse` and block HTML5 drag events in the init script. Progress is shown in the bottom panel's Trasferimenti tab, with the host's category color and a host filter.
 
 ## Panes
 
@@ -78,6 +78,7 @@ Frontend (`src/`):
   - `BottomPanel` (tabs Log / Trasferimenti / File aperti, ⌘J), `TransfersView`, `EditsView`
   - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `EditConfirmDialog`, `PlanDialog` (previewed operations), `Protection` (`ProtectionBanner`, `NameGate`, `CommandPreview`), `Dialogs` (`PromptDialog`, `ConfirmDialog`, `ChooseDialog`, `nameError`)
 - hooks: `usePane.ts` (path, entries, sort, hidden files, selection), `useRemoteSlots.ts` (the two remote slots, shared sessions), `useConnections.ts`, `useActivityLog.ts`, `useTransfers.ts`, `useEdits.ts`
+- `pointerDrag.ts` — pane-to-pane drag & drop with pointer events (see Transfers)
 - pure modules (tested with vitest): `connections.ts` (search, import, merge, validation mirroring the backend), `fileList.ts` (sorting/selection), `logStore.ts` (log merge/filter), `dnd.ts` (drag payload, grouping by parent)
 - `paths.ts` (remote POSIX paths), `format.ts`, `settings.ts` (`usePersistentState`, localStorage with safe fallbacks)
 

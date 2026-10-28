@@ -127,7 +127,15 @@ Lo spostamento tra server diversi non è previsto, perché unirebbe due operazio
 
 **Verifica sul server di test.** 5 MiB in 5 file: copia identica (`diff -r`) con tutte e quattro le combinazioni (`copy-data`, `cp -p`, streaming sulla stessa sessione, streaming tra due sessioni), e il conflitto viene chiesto una volta sola.
 
-## 13. Distribuzione
+## 13. Trascinamento tra pannelli con eventi del puntatore
+
+**Problema.** Nella finestra nativa di macOS il trascinamento HTML5 tra pannelli non funziona. Per ricevere i file dal Finder con il loro percorso, Tauri intercetta tutti i trascinamenti sulla WebView: il gestore di `tauri-runtime-wry` risponde sempre "gestito", quindi `dragover` e `drop` non arrivano mai alla pagina. In Chromium, dove girano i test con Playwright, il problema non si vede.
+
+**Decisione.** Il trascinamento interno usa gli eventi del puntatore (`pointerDrag.ts`), che il gestore nativo non tocca. Il drop dal Finder resta sul gestore nativo (`onDragDropEvent`).
+
+**Alternativa scartata.** `dragDropEnabled: false` farebbe tornare l'HTML5, ma dal Finder arriverebbero file senza percorso e si perderebbe l'upload trascinando dal Finder.
+
+## 14. Distribuzione
 
 Fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` e di leggere `~/.ssh`. Build firmata e notarizzata, arm64 e x64 (in roadmap).
 

@@ -1,12 +1,8 @@
-// Drag & drop of file selections between panes.
-//
-// The source pane is encoded in the MIME type because `dragover` handlers
-// can read the types but not the data.
+// Drag & drop of file selections between panes (see pointerDrag.ts).
 
 /** The local pane and the two remote slots. */
 export type Side = "local" | "r0" | "r1";
 
-export const SIDES: Side[] = ["local", "r0", "r1"];
 
 export const remoteSide = (slot: number): Side => (slot === 0 ? "r0" : "r1");
 
@@ -17,29 +13,6 @@ export interface DragPayload {
   side: Side;
   dir: string;
   names: string[];
-}
-
-const mimeFor = (side: Side) => `application/x-sfm-${side}`;
-
-export function setDragPayload(dataTransfer: DataTransfer, payload: DragPayload): void {
-  dataTransfer.setData(mimeFor(payload.side), JSON.stringify(payload));
-  dataTransfer.setData("text/plain", payload.names.join("\n"));
-  dataTransfer.effectAllowed = "copy";
-}
-
-/** Side of an in-app drag, or null for anything else. */
-export function dragSourceSide(dataTransfer: DataTransfer): Side | null {
-  return SIDES.find((side) => dataTransfer.types.includes(mimeFor(side))) ?? null;
-}
-
-export function getDragPayload(dataTransfer: DataTransfer): DragPayload | null {
-  const side = dragSourceSide(dataTransfer);
-  if (side === null) return null;
-  try {
-    return JSON.parse(dataTransfer.getData(mimeFor(side))) as DragPayload;
-  } catch {
-    return null;
-  }
 }
 
 /** Groups absolute local paths by parent directory (Finder drops). */

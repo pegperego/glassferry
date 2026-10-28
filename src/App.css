@@ -1487,3 +1487,42 @@ button.link {
 button:disabled {
   opacity: 0.45;
 }
+
+/* Pane-to-pane drag (pointerDrag.ts) */
+
+body.dragging,
+body.dragging * {
+  cursor: copy !important;
+  user-select: none;
+}
+
+body.dragging.drag-refused,
+body.dragging.drag-refused * {
+  cursor: no-drop !important;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  display: flex;
+  gap: 8px;
+  max-width: 320px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 25%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drag-ghost.refused {
+  background: var(--muted);
+}
+
+.drag-action {
+  opacity: 0.8;
+}

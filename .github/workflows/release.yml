@@ -1,4 +1,4 @@
-# Builds Glassferry for macOS (arm64, x64) and Linux.
+# Builds Glassferry for macOS (arm64, x64) and Linux (x64, arm64).
 #
 # - Push a tag vX.Y.Z (equal to the version in tauri.conf.json): the bundles
 #   are attached to a draft GitHub release, published by hand after a check.
@@ -27,10 +27,13 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-latest
             target: x86_64-apple-darwin
-          # The oldest supported runner, so the AppImage and the .deb run on
+          # The oldest supported runners, so the AppImage and the .deb run on
           # older glibc versions too.
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+          # Linux on ARM: Raspberry Pi, ARM servers, VMs on Apple silicon Macs.
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

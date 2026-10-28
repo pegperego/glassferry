@@ -4,16 +4,13 @@ Sviluppi futuri di Glassferry. Ogni proposta ha la data in cui è nata e il moti
 
 Le voci aperte sono raggruppate in wave di sviluppo (ordine deciso il 2026-10-28); dentro ogni wave sono in ordine di priorità. Una voce nuova va nella wave in cui serve, oppure in "Da collocare" finché non si decide.
 
-Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in analisi**, **in corso**.
+Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in analisi**, **in corso**, **rimandata** (decisa, ma non si può fare ora).
 
 ## Wave 1 — Affidabilità (0.2)
 
 Prima delle funzioni nuove: nessuna perdita di dati e nessun blocco nei casi già supportati.
 
-| Voce | Stato | Proposta il | Note |
-|---|---|---|---|
-| Prova con configurazioni ssh complesse | proposta | 2026-10-27 | ProxyJump, 1Password (`IdentityAgent`), 2FA/TOTP, `Match`: non presenti nel config usato per la prova sul campo |
-| Pacchetti Linux (AppImage / deb / rpm) | in corso | 2026-10-27 | Prodotti da `release.yml`; da provare su una macchina Linux vera, finora l'app è stata usata solo su macOS |
+Sviluppo completato il 2026-10-28 (le voci sono in "Fatto"); manca la prova nell'app vera delle quattro novità prima di pubblicare la 0.2. Le due prove che richiedono altri ambienti sono state rimandate, sotto "Da collocare".
 
 ## Wave 2 — Uso quotidiano (0.3)
 
@@ -49,10 +46,12 @@ Quasi tutte richiedono la shell: sugli account solo SFTP non sono disponibili.
 
 ## Da collocare
 
-Voci nuove in attesa di una wave.
+Voci nuove in attesa di una wave, e voci rimandate.
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
+| Prova con configurazioni ssh complesse | rimandata | 2026-10-27 | ProxyJump, 1Password (`IdentityAgent`), 2FA/TOTP, `Match`: non presenti nel config usato per la prova sul campo. Rimandata il 2026-10-28 (dalla wave 1): servono configurazioni e server che ora non sono disponibili |
+| Prova dei pacchetti Linux (AppImage / deb / rpm, x64 e arm64) | rimandata | 2026-10-27 | Prodotti da `release.yml` (arm64 aggiunto il 2026-10-28, per provarli in una VM su Mac Apple silicon); checklist in [`linux-test.md`](linux-test.md). Rimandata il 2026-10-28 (dalla wave 1): serve una macchina o una VM Linux con desktop |
 
 ## Fuori scope
 

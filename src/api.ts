@@ -85,6 +85,27 @@ export interface Store {
 
 export const listHosts = () => invoke<HostEntry[]>("list_hosts");
 
+/** Settings the backend needs (`settings.json`); UI preferences stay in localStorage. */
+export interface Settings {
+  /** Absolute path; null: /usr/bin/ssh. */
+  sshBin: string | null;
+}
+
+export interface SshCheck {
+  /** First line of `ssh -V`. */
+  version: string;
+  /** OpenSSH 8.4 or newer (needed for the in-app prompts). */
+  supported: boolean;
+}
+
+export const settingsLoad = () => invoke<Settings>("settings_load");
+
+/** Validates and saves; returns the normalized settings. */
+export const settingsSave = (settings: Settings) => invoke<Settings>("settings_save", { settings });
+
+/** `ssh -V` of `path`, or of the configured binary when null. */
+export const sshCheck = (path: string | null) => invoke<SshCheck>("ssh_check", { path });
+
 /** `warning`: connections.json could not be read and was set aside. */
 export const connectionsLoad = () => invoke<{ store: Store; warning: string | null }>("connections_load");
 

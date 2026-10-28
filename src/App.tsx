@@ -29,6 +29,7 @@ import { EditConfirmDialog } from "./components/EditConfirmDialog";
 import { EditConflictDialog } from "./components/EditConflictDialog";
 import { FilePane, type PaneOps } from "./components/FilePane";
 import { QuickConnect } from "./components/QuickConnect";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { RemotePane } from "./components/RemotePane";
 import { SplitView } from "./components/SplitView";
 import { Toolbar, type RemoteLayout } from "./components/Toolbar";
@@ -45,6 +46,7 @@ import "./App.css";
 
 type Modal =
   | { kind: "quick" }
+  | { kind: "settings" }
   | { kind: "manager"; startWithImport: boolean }
   /** Both remote panes are in use: which one does `connection` replace? */
   | { kind: "replace"; connection: Connection; startPath?: string; only?: number }
@@ -155,6 +157,9 @@ export default function App() {
       } else if (e.metaKey && e.key.toLowerCase() === "k" && !prompts[0]) {
         e.preventDefault();
         setModal({ kind: "quick" });
+      } else if (e.metaKey && e.key === "," && !prompts[0]) {
+        e.preventDefault();
+        setModal({ kind: "settings" });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -445,6 +450,7 @@ export default function App() {
         onLayout={setLayout}
         panelOpen={panelOpen}
         onTogglePanel={togglePanel}
+        onSettings={() => setModal({ kind: "settings" })}
       />
       <div className="workspace">
         <div className="panes">{panesView}</div>
@@ -466,6 +472,7 @@ export default function App() {
           onResize={setPanelHeight}
         />
       </div>
+      {modal?.kind === "settings" && <SettingsDialog onClose={() => setModal(null)} />}
       {modal?.kind === "quick" && store && (
         <QuickConnect
           store={store}

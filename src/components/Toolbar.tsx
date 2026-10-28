@@ -9,9 +9,10 @@ interface Props {
   onLayout: (layout: RemoteLayout) => void;
   panelOpen: boolean;
   onTogglePanel: () => void;
+  onSettings: () => void;
 }
 
-export function Toolbar({ status, onQuickConnect, onManage, layout, onLayout, panelOpen, onTogglePanel }: Props) {
+export function Toolbar({ status, onQuickConnect, onManage, layout, onLayout, panelOpen, onTogglePanel, onSettings }: Props) {
   return (
     <header className="toolbar">
       <button className="primary" title="Nuovo collegamento (⌘K)" onClick={onQuickConnect}>
@@ -38,6 +39,9 @@ export function Toolbar({ status, onQuickConnect, onManage, layout, onLayout, pa
       {status.length > 0 && <span className="muted small">{status.join(" · ")}</span>}
       <button className={panelOpen ? "toggle on" : ""} title="Pannello in basso (⌘J)" onClick={onTogglePanel}>
         Pannello <kbd>⌘J</kbd>
+      </button>
+      <button title="Impostazioni (⌘,)" aria-label="Impostazioni" onClick={onSettings}>
+        ⚙
       </button>
     </header>
   );

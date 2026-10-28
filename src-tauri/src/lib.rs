@@ -9,6 +9,7 @@ pub mod log;
 pub mod plan;
 pub mod runtime_dir;
 pub mod session;
+pub mod settings;
 pub mod ssh_config;
 pub mod transfer;
 
@@ -32,10 +33,9 @@ use plan::{PlanOutcome, PlanPreview, PlanRequest, Planner};
 use ssh_config::HostEntry;
 use transfer::{ConflictAction, Direction, JobInfo, TransferEvent, TransferManager};
 
-const DEFAULT_SSH_BIN: &str = "/usr/bin/ssh";
-
 struct AppState {
-    ssh_bin: PathBuf,
+    settings_store: settings::SettingsStore,
+    settings: Mutex<settings::Settings>,
     runtime_dir: PathBuf,
     askpass: Arc<AskpassServer>,
     logger: Arc<Logger>,
@@ -56,6 +56,11 @@ struct OpenSession {
 }
 
 impl AppState {
+    /// Read at each use: a change applies to the next connection.
+    fn ssh_bin(&self) -> PathBuf {
+        self.settings.lock().unwrap().ssh_bin()
+    }
+
     fn session(&self, id: u64) -> Result<Arc<Session>> {
         self.open_session(id).map(|(_, session)| session)
     }
@@ -101,6 +106,33 @@ struct ConnectionsLoad {
 }
 
 #[tauri::command]
+fn settings_load(state: State<'_, AppState>) -> settings::Settings {
+    state.settings.lock().unwrap().clone()
+}
+
+/// Validates, saves and applies the settings (to new connections).
+#[tauri::command]
+fn settings_save(state: State<'_, AppState>, settings: settings::Settings) -> Result<settings::Settings> {
+    let settings = settings.normalized()?;
+    let op = state.logger.start(None, log::Channel::Local, "settings-save", state.settings_store.path().to_string_lossy());
+    op.result(state.settings_store.save(&settings), |_| Some(format!("ssh: {}", settings.ssh_bin().display())))?;
+    *state.settings.lock().unwrap() = settings.clone();
+    Ok(settings)
+}
+
+/// `ssh -V` of `path` (the configured binary when `None`).
+#[tauri::command]
+async fn ssh_check(state: State<'_, AppState>, path: Option<String>) -> Result<settings::SshCheck> {
+    let path = match path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => state.ssh_bin(),
+    };
+    let mut op = state.logger.start(None, log::Channel::Local, "ssh-version", path.to_string_lossy());
+    op.equivalent(format!("{} -V", log::shell_line([&path])));
+    op.result(settings::check_ssh(&path).await, |check| Some(check.version.clone()))
+}
+
+#[tauri::command]
 fn connections_load(state: State<'_, AppState>) -> ConnectionsLoad {
     ConnectionsLoad {
         store: state.connections.lock().unwrap().clone(),
@@ -138,7 +170,7 @@ fn connection_forget_password(state: State<'_, AppState>, id: String) -> Result<
 /// Effective settings (`ssh -G`) of a source, saved or not.
 #[tauri::command]
 async fn connection_check(state: State<'_, AppState>, source: Source) -> Result<BTreeMap<String, String>> {
-    connections::check_source(&state.ssh_bin, &state.runtime_dir, &source).await
+    connections::check_source(&state.ssh_bin(), &state.runtime_dir, &source).await
 }
 
 #[tauri::command]
@@ -184,7 +216,7 @@ async fn connect(state: State<'_, AppState>, connection_id: String, verbose: boo
     let id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
     let launcher = SshLauncher {
-        ssh_bin: state.ssh_bin.clone(),
+        ssh_bin: state.ssh_bin(),
         control_path: state.runtime_dir.join(format!("{pid}-{id}.sock")),
         log_path: state.runtime_dir.join(format!("{pid}-{id}.log")),
         env: state.askpass.env_for(&connection.name, attempt),
@@ -532,11 +564,24 @@ pub fn run() {
                 }),
                 logger.clone(),
             )?;
-            let connection_store =
-                ConnectionStore::new(ConnectionStore::default_dir().unwrap_or_else(|| runtime_dir.join("config")));
+            let config_dir = ConnectionStore::default_dir().unwrap_or_else(|| runtime_dir.join("config"));
+            let connection_store = ConnectionStore::new(config_dir.clone());
             let (store, connections_warning) = load_connections(&connection_store, &logger);
+            let settings_store = settings::SettingsStore::new(&config_dir);
+            let op = logger.start(None, log::Channel::Local, "settings-load", settings_store.path().to_string_lossy());
+            let settings = match settings_store.load() {
+                (settings, None) => {
+                    op.ok(Some(format!("ssh: {}", settings.ssh_bin().display())));
+                    settings
+                }
+                (settings, Some(problem)) => {
+                    op.fail(format!("{problem}: uso le impostazioni predefinite"));
+                    settings
+                }
+            };
             app.manage(AppState {
-                ssh_bin: PathBuf::from(DEFAULT_SSH_BIN),
+                settings_store,
+                settings: Mutex::new(settings),
                 runtime_dir,
                 askpass,
                 logger,
@@ -553,6 +598,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_hosts,
+            settings_load,
+            settings_save,
+            ssh_check,
             connections_load,
             connections_save,
             connection_forget_password,

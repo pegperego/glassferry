@@ -994,6 +994,21 @@ button.inline {
   font-size: 12px;
 }
 
+.settings h3 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+.field-row {
+  display: flex;
+  gap: 6px;
+}
+
+.field-row input,
+.field-row select {
+  flex: 1;
+}
+
 .confirm-list {
   margin: 0 0 8px;
   padding-left: 18px;

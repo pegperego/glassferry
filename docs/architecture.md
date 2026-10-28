@@ -19,6 +19,7 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 - L'app avvia un proprio ControlMaster: `ssh -M -N -f -o ControlPersist=15m -S <socket> -E <log> -- alias`. Il socket è in una cartella privata e corta (`/tmp/gf-<uid>`, 0700), perché i path dei socket Unix sono limitati a circa 104 byte su macOS. Non riusa il `ControlPath` dell'utente, per non interferire con le sue sessioni.
 - I canali successivi (SFTP, comandi) riusano il master senza riautenticarsi: `-S <socket> -o ControlMaster=no -o RemoteCommand=none -T`. `RemoteCommand=none` e `-T` servono perché con `RemoteCommand` o `RequestTTY force` nel config ssh rifiuterebbe il sottosistema o il comando.
 - Ogni opzione aggiunta oltre a queste va giustificata: il principio è non sovrascrivere il config.
+- Il binario si può cambiare nelle Impostazioni (2026-10-28), per chi usa l'ssh di Homebrew o un'altra build: è lo stesso principio, si usa l'ssh che l'utente usa nel terminale. Serve OpenSSH 8.4 o più recente (`SSH_ASKPASS_REQUIRE`): "Verifica" mostra `ssh -V` e avvisa se è più vecchio, ma non blocca. Il valore si legge a ogni connessione, quindi vale da quella successiva. Le impostazioni che servono al backend stanno in `settings.json` accanto alle connessioni; le preferenze solo dell'interfaccia (disposizione, dimensioni) restano nel localStorage.
 
 ## 2. Niente crate `openssh`
 

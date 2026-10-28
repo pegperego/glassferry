@@ -4,7 +4,7 @@ Open source (MIT) SFTP client with a GUI, macOS first, Linux supported. Tauri 2 
 
 ## Core principle
 
-Never parse or reinterpret the user's `~/.ssh/config`. All connections go through the system `ssh` binary (default `/usr/bin/ssh`), so Include/Match/ProxyJump/IdentityAgent work exactly as in the terminal. Nothing is ever installed on servers.
+Never parse or reinterpret the user's `~/.ssh/config`. All connections go through the system `ssh` binary (default `/usr/bin/ssh`, configurable in Impostazioni), so Include/Match/ProxyJump/IdentityAgent work exactly as in the terminal. Nothing is ever installed on servers.
 
 - Connections (`connections.rs`): the app's list in `~/Library/Application Support/glassferry/connections.json` (Linux: `$XDG_CONFIG_HOME/glassferry/`), with categories (color, `protected`). A connection is either an alias of `~/.ssh/config` (only the alias is stored) or configured in the app: those are written as `Host gf-<id>` blocks to a generated `ssh_config` (0600) ending with `Match all` + `Include ~/.ssh/config` + `Include /etc/ssh/ssh_config`, and ssh runs with `-F <file>`. We write the config, ssh interprets it. Extra options are validated (`Host`/`Match`/`Include` refused) and checked with `ssh -G -F <temp file>` (`connection_check`).
 - Host aliases for the import: collected by `ssh_config.rs` (follows `Include`, skips wildcard/negated patterns). Effective settings only via `ssh -G` (`connections::resolve`).
@@ -66,6 +66,7 @@ UI: double click / Enter on a remote file = edit, on a local file = open with th
 Backend (`src-tauri/src/`):
 - `lib.rs` — Tauri state, commands, exit cleanup
 - `connections.rs` (store, categories, generated ssh_config, `ssh -G`, keychain), `ssh_config.rs` (host aliases for the import), `session.rs` (master, channels, probe, `sh_command`), `askpass.rs`, `runtime_dir.rs`, `error.rs`
+- `settings.rs` — settings the backend needs (`settings.json` in the config dir: ssh binary, read at each connect via `AppState::ssh_bin()`; `ssh_check` runs `ssh -V`, OpenSSH ≥ 8.4); commands `settings_load`/`settings_save`
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
 - `transfer.rs`, `fileops.rs`, `edit.rs`, `plan.rs` — see the sections above
@@ -75,7 +76,7 @@ Frontend (`src/`):
 - `api.ts` — typed wrappers for every Tauri command/event (keep in sync with `lib.rs`)
 - `App.tsx` — connection state, wiring between toolbar, panes, transfers, edits and dialogs
 - `components/` — React function components only:
-  - `Toolbar` (Nuovo collegamento ⌘K, Gestisci connessioni, ⌘J), `QuickConnect` (search palette), `ConnectionManager` (modal: list, form, import from ~/.ssh/config, categories, import/export file)
+  - `Toolbar` (Nuovo collegamento ⌘K, Gestisci connessioni, ⌘J, ⚙ Impostazioni ⌘,), `SettingsDialog`, `QuickConnect` (search palette), `ConnectionManager` (modal: list, form, import from ~/.ssh/config, categories, import/export file)
   - `FilePane` (generic virtualized pane: keyboard, context menu, inline rename, drag & drop with `acceptsFrom`, `transferTargets` for ⇧F5; `color` = category border), `RemotePane` (name + category badge, open in other pane, close), `SplitView` (draggable dividers), `ContextMenu`
   - `BottomPanel` (tabs Log / Trasferimenti / File aperti, ⌘J), `TransfersView`, `EditsView`
   - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `EditConfirmDialog`, `PlanDialog` (previewed operations), `Protection` (`ProtectionBanner`, `NameGate`, `CommandPreview`), `Dialogs` (`PromptDialog`, `ConfirmDialog`, `ChooseDialog`, `nameError`)

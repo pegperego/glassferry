@@ -282,6 +282,19 @@ export type DeleteMethod = "trash" | "shell" | "sftp";
 
 export const fsMkdir = (target: Target, dir: string, name: string) => invoke<void>("fs_mkdir", { target, dir, name });
 
+/** chmod / chown / chgrp; null fields stay unchanged. */
+export interface AttrChange {
+  mode: number | null;
+  owner: string | null;
+  group: string | null;
+  /** Also the content of the selected folders. */
+  recursive: boolean;
+}
+
+/** `dryRun`: only the commands that would run (preview). */
+export const fsAttrs = (target: Target, dir: string, names: string[], change: AttrChange, dryRun: boolean) =>
+  invoke<string[]>("fs_attrs", { target, dir, names, change, dryRun });
+
 /** Opens the system terminal in `path` (remote: a new ssh connection that changes to it). */
 export const openTerminal = (target: Target, path: string) => invoke<void>("open_terminal", { target, path });
 

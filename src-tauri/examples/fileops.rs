@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use glassferry_lib::askpass::{AskpassServer, PromptKind};
+use glassferry_lib::attrs::{self, AttrChange};
 use glassferry_lib::fileops::{remote, Target};
 use glassferry_lib::plan::{PlanMethod, PlanRequest, Planner};
 use glassferry_lib::log::{Logger, Status};
@@ -125,6 +126,34 @@ fn main() {
                 && planner.execute(&logger, preview.id, Some(&session)).await.is_ok()
                 && exists("s.txt")
                 && planner.execute(&logger, preview.id, Some(&session)).await.is_err(),
+        );
+
+        // chmod: shell `chmod -R` or an SFTP walk, same result; links not followed.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(format!("{work}/perm/sub")).unwrap();
+        std::fs::write(format!("{work}/perm/sub/f.txt"), b"f").unwrap();
+        std::fs::write(format!("{work}/outside.txt"), b"o").unwrap();
+        std::fs::set_permissions(format!("{work}/outside.txt"), std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(format!("{work}/outside.txt"), format!("{work}/perm/link")).unwrap();
+        let mode = |p: &str| std::fs::metadata(format!("{work}/{p}")).unwrap().permissions().mode() & 0o7777;
+        let chmod = AttrChange { mode: Some(0o750), owner: None, group: None, recursive: true };
+        let lines = attrs::remote::commands(&session, &work, &["perm".into()], &chmod).unwrap();
+        let by_shell = session.capabilities.commands.iter().any(|c| c == "chmod");
+        check(
+            "chmod preview matches the account",
+            if by_shell { lines[0].contains("chmod -R -- 0750") } else { lines[0].starts_with("sftp> chmod 750") },
+        );
+        let applied = attrs::remote::apply(&session, &work, &["perm".into()], &chmod).await;
+        check(
+            "recursive chmod",
+            applied.is_ok() && (mode("perm"), mode("perm/sub"), mode("perm/sub/f.txt")) == (0o750, 0o750, 0o750),
+        );
+        check("chmod does not follow links", mode("outside.txt") == 0o600);
+        let chgrp = AttrChange { mode: None, owner: None, group: Some("staff".into()), recursive: false };
+        check(
+            "group change needs the shell",
+            attrs::remote::commands(&session, &work, &["perm".into()], &chgrp).is_ok()
+                == session.capabilities.commands.iter().any(|c| c == "chgrp"),
         );
 
         session.close().await;

@@ -22,7 +22,7 @@ use crate::log::{sftp_equivalent, shell_line, Channel, LogOp, Logger};
 
 const CONTROL_PERSIST: &str = "ControlPersist=15m";
 const PROBE_MARKER: &str = "__GF__";
-const PROBED_COMMANDS: &[&str] = &["rm", "cp", "mv", "du", "find", "sha256sum", "tar"];
+const PROBED_COMMANDS: &[&str] = &["rm", "cp", "mv", "du", "find", "sha256sum", "tar", "chmod", "chown", "chgrp"];
 
 /// How ssh processes for one host are spawned.
 #[derive(Clone)]

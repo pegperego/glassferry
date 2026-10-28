@@ -1,4 +1,5 @@
 pub mod askpass;
+pub mod attrs;
 pub mod connections;
 pub mod edit;
 pub mod entry;
@@ -438,6 +439,25 @@ async fn fs_delete(state: State<'_, AppState>, target: Target, dir: String, name
     }
 }
 
+/// chmod / chown / chgrp of a selection. `dry_run`: only the commands that
+/// would run (preview); otherwise they run and are returned.
+#[tauri::command]
+async fn fs_attrs(
+    state: State<'_, AppState>,
+    target: Target,
+    dir: String,
+    names: Vec<String>,
+    change: attrs::AttrChange,
+    dry_run: bool,
+) -> Result<Vec<String>> {
+    match (target, dry_run) {
+        (Target::Local, true) => attrs::local::commands(&dir, &names, &change),
+        (Target::Local, false) => attrs::local::apply(&state.logger, &dir, &names, &change).await,
+        (Target::Remote { session_id }, true) => attrs::remote::commands(&*state.session(session_id)?, &dir, &names, &change),
+        (Target::Remote { session_id }, false) => attrs::remote::apply(&*state.session(session_id)?, &dir, &names, &change).await,
+    }
+}
+
 /// Prepares a delete, move or rename and returns its preview.
 #[tauri::command]
 async fn fs_plan(state: State<'_, AppState>, target: Target, request: PlanRequest) -> Result<PlanPreview> {
@@ -652,6 +672,7 @@ pub fn run() {
             fs_rename,
             fs_move,
             fs_delete,
+            fs_attrs,
             fs_plan,
             fs_plan_execute,
             fs_plan_discard,

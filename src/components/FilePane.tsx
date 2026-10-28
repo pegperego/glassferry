@@ -9,7 +9,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { isDirLike, type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
+import { isDirLike, type AttrChange, type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
 import type { Protection } from "../connections";
 import { clickSelect, emptySelection, moveCursor, selectAll, toggleSort, type SortKey } from "../fileList";
 import { formatPermissions, formatSize, formatTime } from "../format";
@@ -19,6 +19,7 @@ import { joinPath, parentPath, pathSegments } from "../paths";
 import type { PaneState } from "../usePane";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { PromptDialog, nameError } from "./Dialogs";
+import { PermissionsDialog } from "./PermissionsDialog";
 import { PlanDialog } from "./PlanDialog";
 
 const ROW_HEIGHT = 24;
@@ -40,6 +41,10 @@ export interface PaneOps {
   protection: Protection | null;
   /** Opens the system terminal in a folder (⌥⌘T); null on SFTP-only accounts. */
   openTerminal: ((dir: string) => Promise<void>) | null;
+  /** chmod / chown: preview (`dryRun`) or apply. */
+  attrs: (dir: string, names: string[], change: AttrChange, dryRun: boolean) => Promise<string[]>;
+  /** Owner and group can change (remote account with chown/chgrp). */
+  canChown: boolean;
 }
 
 /** Bookmarks of the pane's connection (or of local folders). */
@@ -78,6 +83,7 @@ interface Props {
 
 type Dialog =
   | { kind: "mkdir" }
+  | { kind: "permissions"; names: string[] }
   | { kind: "move"; names: string[] }
   | {
       kind: "plan";
@@ -339,6 +345,7 @@ export function FilePane(props: Props) {
         { separator: true },
         { label: "Rinomina", shortcut: "F2", disabled: chosen.length !== 1, onSelect: () => startRename(entry.name) },
         { label: "Sposta in…", onSelect: () => setDialog({ kind: "move", names: chosen }) },
+        { label: "Permessi…", onSelect: () => setDialog({ kind: "permissions", names: chosen }) },
         { label: "Copia percorso", onSelect: () => path && void navigator.clipboard.writeText(joinPath(path, entry.name)) },
         { separator: true },
         {
@@ -529,6 +536,21 @@ export function FilePane(props: Props) {
         />
       )}
 
+      {dialog?.kind === "permissions" && path !== null && (
+        <PermissionsDialog
+          dir={path}
+          entries={visible.filter((v) => dialog.names.includes(v.name))}
+          attrs={ops.attrs}
+          canChown={ops.canChown}
+          protection={ops.protection}
+          onCancel={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
+            void pane.refresh();
+            listRef.current?.focus();
+          }}
+        />
+      )}
       {dialog?.kind === "mkdir" && path !== null && (
         <PromptDialog
           title="Nuova cartella"

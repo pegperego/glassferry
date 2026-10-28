@@ -47,11 +47,13 @@ The local pane is always on the left; on the right up to two remote panes (slots
 
 `plan.rs` (`Planner`): deletes (always) and, on protected connections, renames and moves are first planned with `fs_plan(target, request)`; the preview lists the exact commands (Trash `mv`, the `rm -rf` exec line, every SFTP `rm`/`rmdir`, `sftp> rename` plus the `mv` fallback) and the full list goes to the log. `fs_plan_execute(id)` runs exactly that plan (single use, 10 min TTL): an SFTP delete runs only the listed requests, so files added after the preview make it fail instead of being deleted unseen. `fs_plan_discard` drops it. Check: the `fileops` example covers both account types.
 
-Protected categories (`Category.protected`) require typing the connection name (`NameGate`, `confirmationMatches` in `connections.ts`) for: delete, rename, move (`PlanDialog`), overwrite in an upload conflict including "Sovrascrivi tutti" (`ConflictDialog`, commands from `ConflictRequest.commands`), and the first upload of each edited file (`edit_open(..., confirmSaves)`, `edit-confirm` event, `edit_confirm_save`; state `unconfirmed` when refused, "Carica sul server" asks again). "Non chiedere più per questo file" is stored in localStorage `edits.noConfirm` (`connectionId:path`). Non-protected confirmations show the same commands collapsed. Uploads of new files and downloads are never gated.
+Protected categories (`Category.protected`) require typing the connection name (`NameGate`, `confirmationMatches` in `connections.ts`) for: delete, rename, move (`PlanDialog`), permissions and owner (`PermissionsDialog`), overwrite in an upload conflict including "Sovrascrivi tutti" (`ConflictDialog`, commands from `ConflictRequest.commands`), and the first upload of each edited file (`edit_open(..., confirmSaves)`, `edit-confirm` event, `edit_confirm_save`; state `unconfirmed` when refused, "Carica sul server" asks again). "Non chiedere più per questo file" is stored in localStorage `edits.noConfirm` (`connectionId:path`). Non-protected confirmations show the same commands collapsed. Uploads of new files and downloads are never gated.
 
 ## File operations
 
 `fileops.rs`, commands `fs_mkdir`/`fs_rename`/`fs_move`/`fs_delete` with a `Target` (`{kind:"local"}` or `{kind:"remote", sessionId}`). Names are validated (`validate_name`: no `/`, `.`, `..`, empty). Rename and move never overwrite (destination checked first). Local delete = Trash (`trash` crate, NSFileManager method: no Finder permission prompt). Remote delete is permanent: `rm -rf -- "$@"` via `sh_command` when the probe found `rm`, recursive SFTP walk otherwise (symlinks removed, never followed); `/` and the home dir are refused. Remote move falls back to `mv` when SFTP rename fails (e.g. across filesystems). Check against the fixture: `cargo run --example fileops -- "$PWD/../.dev-sshd/ssh" gf-local segreta <work-dir>` (and `gf-sftponly`).
+
+Permissions (`attrs.rs`, command `fs_attrs(target, dir, names, change, dryRun)`, dialog `PermissionsDialog` from "Permessi…"): mode grid + octal (special bits kept), optional recursion, owner/group on remote accounts with `chown`/`chgrp`. Remote: `chmod|chown|chgrp [-R] -- <operand> "$@"` through `sh_command` when the probe found the command (`--` before the operand: BSD chmod takes anything after the mode as a file), else SFTP setstat walking the tree without following symlinks (children listed before their folder changes); owner/group need the shell (SFTP v3 knows numeric ids only). Local: mode only, with std. `dryRun` returns exactly the commands `apply` runs (preview); protected connections ask for the name. Check: the `fileops` example (both accounts).
 
 UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌥⌘T terminal, ⌘D bookmark, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
 
@@ -78,7 +80,7 @@ Backend (`src-tauri/src/`):
 - `terminal.rs` — open the system terminal at a folder (see Terminal)
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
-- `transfer.rs`, `fileops.rs`, `edit.rs`, `plan.rs` — see the sections above
+- `transfer.rs`, `fileops.rs`, `attrs.rs`, `edit.rs`, `plan.rs` — see the sections above
 - `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `remote_copy.rs`, `resume.rs`, `fileops.rs`, `edit.rs`, `connections.rs` (`-F`, ProxyJump between app connections, `ssh -G` errors, keychain round trip: `cargo run --example connections -- "$PWD/../.dev-sshd" segreta <work-dir>`)
 
 Frontend (`src/`):

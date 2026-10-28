@@ -18,7 +18,6 @@ Le funzioni che si usano tutti i giorni. Si parte dalla schermata Impostazioni, 
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
-| chmod / chown da interfaccia | proposta | 2026-10-27 | Anche ricorsivo con `chmod -R` quando la shell è disponibile |
 | Dimensione di una cartella | proposta | 2026-10-27 | `du -sk` via shell, visita SFTP altrimenti |
 
 ## Wave 3 — Strumenti lato server (0.4)

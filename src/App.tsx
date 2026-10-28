@@ -4,6 +4,7 @@ import {
   askpassRespond,
   fsMkdir,
   openTerminal,
+  fsAttrs,
   fsMove,
   fsPlan,
   fsPlanDiscard,
@@ -64,8 +65,8 @@ type Modal =
   | { kind: "disconnect"; slot: number; files: EditInfo[]; then: () => void }
   | null;
 
-/** `shell`: the account can run commands (needed by the remote terminal). */
-function paneOps(target: Target, protection: Protection | null, shell: boolean): PaneOps {
+/** What the account allows beyond SFTP: a shell (remote terminal), chown/chgrp. */
+function paneOps(target: Target, protection: Protection | null, can: { shell: boolean; chown: boolean }): PaneOps {
   return {
     mkdir: (dir, name) => fsMkdir(target, dir, name),
     rename: (dir, from, to) => fsRename(target, dir, from, to),
@@ -75,11 +76,13 @@ function paneOps(target: Target, protection: Protection | null, shell: boolean):
     discard: (id) => void fsPlanDiscard(id).catch(() => {}),
     permanentDelete: target.kind === "remote",
     protection,
-    openTerminal: shell ? (dir) => openTerminal(target, dir) : null,
+    openTerminal: can.shell ? (dir) => openTerminal(target, dir) : null,
+    attrs: (dir, names, change, dryRun) => fsAttrs(target, dir, names, change, dryRun),
+    canChown: can.chown,
   };
 }
 
-const localOps = paneOps({ kind: "local" }, null, true);
+const localOps = paneOps({ kind: "local" }, null, { shell: true, chown: false });
 
 /** `dir` is `path` or inside it. */
 const within = (path: string | null, dir: string) =>
@@ -395,7 +398,10 @@ export default function App() {
           ops={paneOps(
             { kind: "remote", sessionId: s.result.sessionId },
             protectionOf(store, s.connection),
-            s.result.capabilities.shell,
+            {
+              shell: s.result.capabilities.shell,
+              chown: ["chown", "chgrp"].every((c) => s.result.capabilities.commands.includes(c)),
+            },
           )}
           connection={s.connection}
           name={paneName(slot)}

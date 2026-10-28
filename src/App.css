@@ -387,6 +387,9 @@ body.resizing * {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  /* Dialogs opened by a pane come before the bottom panel in the DOM;
+     below context menus, toasts and the drag ghost. */
+  z-index: 40;
   background: rgb(0 0 0 / 35%);
   display: flex;
   align-items: center;
@@ -1002,6 +1005,42 @@ button.inline {
 .field-row {
   display: flex;
   gap: 6px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.perm-editor {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  margin: 4px 0 10px;
+}
+
+.perm-grid {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.perm-grid th {
+  font-weight: normal;
+  color: var(--muted);
+  padding: 2px 8px;
+  text-align: left;
+}
+
+.perm-grid td {
+  text-align: center;
+  padding: 2px 8px;
+}
+
+.perm-editor .field input {
+  width: 5em;
 }
 
 .field-row input,

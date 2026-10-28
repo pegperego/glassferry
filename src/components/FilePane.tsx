@@ -42,6 +42,13 @@ export interface PaneOps {
   openTerminal: ((dir: string) => Promise<void>) | null;
 }
 
+/** Bookmarks of the pane's connection (or of local folders). */
+export interface PaneBookmarks {
+  list: { id: string; name: string; path: string }[];
+  /** Adds the folder, or removes it when already marked. */
+  toggle: (path: string) => void;
+}
+
 interface Props {
   pane: PaneState;
   title: ReactNode;
@@ -57,6 +64,8 @@ interface Props {
   ops: PaneOps;
   /** Copy to the default other pane (button and F5); absent when not possible. */
   transfer?: { label: string; title: string; run: (names: string[]) => void };
+  /** ★ menu and ⌘D; absent while the connections are loading. */
+  bookmarks?: PaneBookmarks;
   /** Every copy destination: ⇧F5 menu and context menu. */
   transferTargets?: { label: string; run: (names: string[]) => void }[];
   /** Files dragged from another pane, dropped into `targetDir`. */
@@ -85,7 +94,7 @@ type Dialog =
     };
 
 export function FilePane(props: Props) {
-  const { pane, title, actions, info, color, active, onActivate, side, ops, transfer, onDropFiles, openFile } = props;
+  const { pane, title, actions, info, color, active, onActivate, side, ops, transfer, onDropFiles, openFile, bookmarks } = props;
   const transferTargets = props.transferTargets ?? [];
   const acceptsFrom = props.acceptsFrom ?? [];
   const { path, visible, selection, sort } = pane;
@@ -97,7 +106,13 @@ export function FilePane(props: Props) {
   const dropTarget = drag?.target?.side === side ? (drag.target.entry ?? "") : null;
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Context menu; with `targets`, the ⇧F5 menu of copy destinations for those names. */
-  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry | null; targets?: string[] } | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    entry: FileEntry | null;
+    targets?: string[];
+    bookmarks?: boolean;
+  } | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
@@ -244,6 +259,7 @@ export function FilePane(props: Props) {
     else if (e.key === "F7" || (e.key.toLowerCase() === "n" && e.metaKey && e.shiftKey)) setDialog({ kind: "mkdir" });
     // ⌥ changes e.key on macOS (⌥T = †): match the physical key.
     else if (e.code === "KeyT" && e.metaKey && e.altKey) terminalAt(path);
+    else if (e.key.toLowerCase() === "d" && e.metaKey && bookmarks && path) bookmarks.toggle(path);
     else if (e.key === "F5" && e.shiftKey && transferTargets.length > 0) {
       const chosen = selectionOrCursor();
       const rect = listRef.current?.getBoundingClientRect();
@@ -344,6 +360,24 @@ export function FilePane(props: Props) {
     return items;
   };
 
+  const marked = bookmarks !== undefined && path !== null && bookmarks.list.some((b) => b.path === path.replace(/(.)\/+$/, "$1"));
+
+  const bookmarkItems = (): MenuItem[] => {
+    if (!bookmarks || path === null) return [];
+    const items: MenuItem[] = [
+      {
+        label: marked ? "Togli questa cartella dai segnalibri" : "Aggiungi questa cartella ai segnalibri",
+        shortcut: "⌘D",
+        onSelect: () => bookmarks.toggle(path),
+      },
+    ];
+    if (bookmarks.list.length > 0) items.push({ separator: true });
+    for (const b of bookmarks.list) {
+      items.push({ label: b.name === b.path ? b.path : `${b.name}  ·  ${b.path}`, onSelect: () => void pane.navigate(b.path) });
+    }
+    return items;
+  };
+
   const selectedFiles = visible.filter((v) => selection.selected.has(v.name));
   const selectedBytes = selectedFiles.reduce((sum, v) => sum + (isDirLike(v) ? 0 : (v.size ?? 0)), 0);
 
@@ -365,6 +399,19 @@ export function FilePane(props: Props) {
               </button>
             ))}
         </nav>
+        {bookmarks && (
+          <button
+            title="Segnalibri (⌘D aggiunge o toglie questa cartella)"
+            className={marked ? "toggle on" : "toggle"}
+            disabled={path === null}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setMenu({ x: rect.left, y: rect.bottom + 2, entry: null, bookmarks: true });
+            }}
+          >
+            {marked ? "★" : "☆"}
+          </button>
+        )}
         <button
           title="Mostra file nascosti (⇧⌘.)"
           className={pane.showHidden ? "toggle on" : "toggle"}
@@ -472,9 +519,11 @@ export function FilePane(props: Props) {
           x={menu.x}
           y={menu.y}
           items={
-            menu.targets
-              ? transferTargets.map((t) => ({ label: t.label, onSelect: () => t.run(menu.targets!) }))
-              : menuItems(menu.entry)
+            menu.bookmarks
+              ? bookmarkItems()
+              : menu.targets
+                ? transferTargets.map((t) => ({ label: t.label, onSelect: () => t.run(menu.targets!) }))
+                : menuItems(menu.entry)
           }
           onClose={() => setMenu(null)}
         />

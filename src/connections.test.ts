@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Store } from "./api";
 import {
+  addBookmark,
+  bookmarksOf,
   confirmationMatches,
   connectionErrors,
   emptyAppSource,
@@ -11,6 +13,9 @@ import {
   notImported,
   optionError,
   protectionOf,
+  removeBookmark,
+  removeConnection,
+  searchBookmarks,
   searchConnections,
 } from "./connections";
 
@@ -26,8 +31,50 @@ function store(): Store {
       { ...newConnection("dev", { ...emptyAppSource(), host: "10.0.0.5", user: "deploy" }), id: "b", name: "Staging" },
       { ...newConnection("prod", { kind: "sshConfig", alias: "db" }), id: "c", name: "Web 9" },
     ],
+    bookmarks: [],
   };
 }
+
+describe("bookmarks", () => {
+  it("adds once per folder, named after it, and removes", () => {
+    let s = addBookmark(store(), "a", "/var/www/site/");
+    s = addBookmark(s, "a", "/var/www/site");
+    s = addBookmark(s, null, "/");
+    expect(s.bookmarks.map((b) => [b.connectionId, b.name, b.path])).toEqual([
+      ["a", "site", "/var/www/site"],
+      [null, "/", "/"],
+    ]);
+    expect(bookmarksOf(s, "a")).toHaveLength(1);
+    expect(bookmarksOf(s, "b")).toHaveLength(0);
+    expect(removeBookmark(s, s.bookmarks[0].id).bookmarks).toHaveLength(1);
+  });
+
+  it("go away with their connection", () => {
+    const s = addBookmark(addBookmark(store(), "a", "/srv"), "b", "/srv");
+    expect(removeConnection(s, "a").bookmarks.map((b) => b.connectionId)).toEqual(["b"]);
+  });
+
+  it("are found by name, path or connection", () => {
+    const s = addBookmark(addBookmark(store(), "a", "/var/www/shop"), null, "/Users/me/www");
+    expect(searchBookmarks(s, "shop").map((r) => r.connection.id)).toEqual(["a"]);
+    expect(searchBookmarks(s, "web 10")).toHaveLength(1);
+    // Local bookmarks are not connections.
+    expect(searchBookmarks(s, "users")).toHaveLength(0);
+    expect(searchBookmarks(s, "")).toHaveLength(0);
+  });
+
+  it("merge from an import only for known connections", () => {
+    const incoming = { ...store(), connections: [], bookmarks: [] } as Store;
+    incoming.bookmarks = [
+      { id: "x1", name: "logs", connectionId: "a", path: "/var/log" },
+      { id: "x2", name: "gone", connectionId: "zzz", path: "/tmp" },
+    ];
+    const mine = addBookmark(store(), "a", "/var/log");
+    const merged = mergeStores(mine, incoming).store;
+    expect(merged.bookmarks).toHaveLength(1);
+    expect(mergeStores(store(), incoming).store.bookmarks.map((b) => b.id)).toEqual(["x1"]);
+  });
+});
 
 describe("searchConnections", () => {
   it("matches every term on name, target and category, sorted by category then name", () => {

@@ -80,6 +80,21 @@ pub struct Store {
     pub version: u32,
     pub categories: Vec<Category>,
     pub connections: Vec<Connection>,
+    /// Missing in files written before bookmarks existed.
+    #[serde(default)]
+    pub bookmarks: Vec<Bookmark>,
+}
+
+/// A folder to go back to: on a connection, or local.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Bookmark {
+    pub id: String,
+    pub name: String,
+    /// `None`: a local folder.
+    pub connection_id: Option<String>,
+    /// Absolute path.
+    pub path: String,
 }
 
 impl Default for Store {
@@ -98,6 +113,7 @@ impl Default for Store {
                 category("prod", "Produzione", "#d23c3c", true),
             ],
             connections: Vec::new(),
+            bookmarks: Vec::new(),
         }
     }
 }
@@ -134,6 +150,24 @@ impl Store {
                 return invalid(format!("«{}»: categoria inesistente", connection.name));
             }
             validate_source(&connection.source).map_err(|e| AppError::Other(format!("«{}»: {e}", connection.name)))?;
+        }
+        let mut bookmark_ids = HashSet::new();
+        for bookmark in &self.bookmarks {
+            check_id(&bookmark.id)?;
+            if !bookmark_ids.insert(&bookmark.id) {
+                return invalid(format!("segnalibro duplicato: {}", bookmark.id));
+            }
+            if bookmark.name.trim().is_empty() {
+                return invalid("un segnalibro non ha nome");
+            }
+            if !bookmark.path.starts_with('/') {
+                return invalid(format!("segnalibro «{}»: percorso non assoluto", bookmark.name));
+            }
+            if let Some(id) = &bookmark.connection_id
+                && !connection_ids.contains(id)
+            {
+                return invalid(format!("segnalibro «{}»: connessione inesistente", bookmark.name));
+            }
         }
         Ok(())
     }
@@ -525,6 +559,37 @@ mod tests {
         store.connections[0].category_id = "prod".into();
         store.connections[0].id = "../x".into();
         assert!(store.validate().is_err());
+    }
+
+    #[test]
+    fn validates_bookmarks() {
+        let mut store = Store::default();
+        store.connections.push(Connection {
+            id: "web".into(),
+            name: "Web".into(),
+            category_id: "prod".into(),
+            source: Source::SshConfig { alias: "web".into() },
+            remote_dir: None,
+            local_dir: None,
+            save_password: false,
+        });
+        let bookmark = |id: &str, connection: Option<&str>, path: &str| Bookmark {
+            id: id.into(),
+            name: "www".into(),
+            connection_id: connection.map(String::from),
+            path: path.into(),
+        };
+        store.bookmarks = vec![bookmark("b1", Some("web"), "/var/www"), bookmark("b2", None, "/Users/me")];
+        assert!(store.validate().is_ok());
+        store.bookmarks.push(bookmark("b3", Some("gone"), "/x"));
+        assert!(store.validate().is_err());
+        store.bookmarks[2] = bookmark("b3", None, "relative/path");
+        assert!(store.validate().is_err());
+        store.bookmarks[2] = bookmark("b1", None, "/x");
+        assert!(store.validate().is_err());
+        // Files written before bookmarks existed still load.
+        let old: Store = serde_json::from_str(r#"{"version":1,"categories":[],"connections":[]}"#).unwrap();
+        assert!(old.bookmarks.is_empty());
     }
 
     #[test]

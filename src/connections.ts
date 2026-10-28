@@ -1,7 +1,7 @@
 // Pure logic on the connection store: search, import, merge, validation.
 // Validation mirrors src-tauri/src/connections.rs (the backend checks again).
 
-import type { Category, Connection, HostEntry, Source, Store } from "./api";
+import type { Bookmark, Category, Connection, HostEntry, Source, Store } from "./api";
 
 /** Keywords that would break the generated ssh_config. */
 const FORBIDDEN_KEYWORDS = ["host", "match", "include"];
@@ -77,11 +77,21 @@ export function mergeStores(store: Store, incoming: Store): { store: Store; adde
   const categoryIds = new Set(store.categories.map((c) => c.id));
   const connectionIds = new Set(store.connections.map((c) => c.id));
   const newConnections = incoming.connections.filter((c) => !connectionIds.has(c.id));
+  const connections = [...store.connections, ...newConnections];
+  // Bookmarks of known connections (or local), skipping folders already marked.
+  const known = new Set(connections.map((c) => c.id));
+  const bookmarks = [...store.bookmarks];
+  for (const bookmark of incoming.bookmarks ?? []) {
+    if (bookmark.connectionId !== null && !known.has(bookmark.connectionId)) continue;
+    if (bookmarks.some((b) => b.id === bookmark.id || sameFolder(b, bookmark.connectionId, bookmark.path))) continue;
+    bookmarks.push(bookmark);
+  }
   return {
     store: {
       ...store,
       categories: [...store.categories, ...incoming.categories.filter((c) => !categoryIds.has(c.id))],
-      connections: [...store.connections, ...newConnections],
+      connections,
+      bookmarks,
     },
     added: newConnections.length,
     skipped: incoming.connections.length - newConnections.length,
@@ -98,8 +108,59 @@ export function upsertConnection(store: Store, connection: Connection): Store {
   };
 }
 
+/** Also removes the connection's bookmarks. */
 export function removeConnection(store: Store, id: string): Store {
-  return { ...store, connections: store.connections.filter((c) => c.id !== id) };
+  return {
+    ...store,
+    connections: store.connections.filter((c) => c.id !== id),
+    bookmarks: store.bookmarks.filter((b) => b.connectionId !== id),
+  };
+}
+
+// ---- bookmarks ----
+
+/** `/a/b/` → `/a/b`; `/` stays. */
+function normalizeFolder(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
+}
+
+function sameFolder(bookmark: Bookmark, connectionId: string | null, path: string): boolean {
+  return bookmark.connectionId === connectionId && bookmark.path === normalizeFolder(path);
+}
+
+/** Bookmarks of a connection (null: local folders), by name. */
+export function bookmarksOf(store: Store, connectionId: string | null): Bookmark[] {
+  return store.bookmarks
+    .filter((b) => b.connectionId === connectionId)
+    .sort((a, b) => a.name.localeCompare(b.name, "it", { sensitivity: "base" }));
+}
+
+export function findBookmark(store: Store, connectionId: string | null, path: string): Bookmark | undefined {
+  return store.bookmarks.find((b) => sameFolder(b, connectionId, path));
+}
+
+/** Adds a bookmark named after the folder, unless the folder is already marked. */
+export function addBookmark(store: Store, connectionId: string | null, path: string): Store {
+  if (findBookmark(store, connectionId, path)) return store;
+  const folder = normalizeFolder(path);
+  const name = folder === "/" ? "/" : folder.slice(folder.lastIndexOf("/") + 1);
+  return { ...store, bookmarks: [...store.bookmarks, { id: newId(), name, connectionId, path: folder }] };
+}
+
+export function removeBookmark(store: Store, id: string): Store {
+  return { ...store, bookmarks: store.bookmarks.filter((b) => b.id !== id) };
+}
+
+/** Remote bookmarks for the quick connect palette: by bookmark name, path or connection name. */
+export function searchBookmarks(store: Store, query: string): { bookmark: Bookmark; connection: Connection }[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return store.bookmarks.flatMap((bookmark) => {
+    const connection = store.connections.find((c) => c.id === bookmark.connectionId);
+    if (!connection) return [];
+    const text = `${bookmark.name} ${bookmark.path} ${connection.name}`.toLowerCase();
+    return text.includes(q) ? [{ bookmark, connection }] : [];
+  });
 }
 
 export function duplicateConnection(connection: Connection): Connection {

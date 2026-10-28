@@ -32,9 +32,18 @@ import { FilePane, type PaneOps } from "./components/FilePane";
 import { QuickConnect } from "./components/QuickConnect";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { RemotePane } from "./components/RemotePane";
+import type { PaneBookmarks } from "./components/FilePane";
 import { SplitView } from "./components/SplitView";
 import { Toolbar, type RemoteLayout } from "./components/Toolbar";
-import { categoryOf, protectionOf, type Protection } from "./connections";
+import {
+  addBookmark,
+  bookmarksOf,
+  categoryOf,
+  findBookmark,
+  protectionOf,
+  removeBookmark,
+  type Protection,
+} from "./connections";
 import { groupByParent, remoteSide, slotOf, type DragPayload, type Side } from "./dnd";
 import { usePersistentState } from "./settings";
 import { useActivityLog } from "./useActivityLog";
@@ -256,6 +265,38 @@ export default function App() {
     else setModal({ kind: "replace", connection });
   };
 
+  /** A bookmark of a connection: the pane already showing it goes there, else it opens like a new connection. */
+  const openBookmark = (connectionId: string, path: string) => {
+    setModal(null);
+    const open = [0, 1].find((i) => {
+      const s = slots[i];
+      return s.state === "connected" && s.connection.id === connectionId;
+    });
+    if (open !== undefined) {
+      void panes[open].navigate(path);
+      activate(remoteSide(open));
+      return;
+    }
+    const connection = store?.connections.find((c) => c.id === connectionId);
+    if (!connection) return;
+    const free = [0, 1].find((i) => slots[i].state === "idle" || slots[i].state === "failed");
+    if (free !== undefined) void openIn(free, connection, path);
+    else setModal({ kind: "replace", connection, startPath: path });
+  };
+
+  /** ★ menu and ⌘D of a pane: `connectionId` null for the local one. */
+  const paneBookmarks = (connectionId: string | null): PaneBookmarks | undefined =>
+    store
+      ? {
+          list: bookmarksOf(store, connectionId),
+          toggle: (path) => {
+            const existing = findBookmark(store, connectionId, path);
+            const next = existing ? removeBookmark(store, existing.id) : addBookmark(store, connectionId, path);
+            connections.save(next).catch((e) => setAppError(String(e)));
+          },
+        }
+      : undefined;
+
   /** "Apri nell'altro pannello": same connection and folder in the other remote pane. */
   const openInOther = (slot: number) => {
     const source = slots[slot];
@@ -311,6 +352,7 @@ export default function App() {
       pane={localPane}
       side="local"
       ops={localOps}
+      bookmarks={paneBookmarks(null)}
       title="Locale"
       active={activeSide === "local"}
       onActivate={() => activate("local")}
@@ -349,6 +391,7 @@ export default function App() {
         <RemotePane
           key={key}
           side={remoteSide(slot)}
+          bookmarks={paneBookmarks(s.connection.id)}
           ops={paneOps(
             { kind: "remote", sessionId: s.result.sessionId },
             protectionOf(store, s.connection),
@@ -484,6 +527,7 @@ export default function App() {
         <QuickConnect
           store={store}
           onConnect={handleConnect}
+          onOpenBookmark={openBookmark}
           onManage={() => setModal({ kind: "manager", startWithImport: false })}
           onClose={() => setModal(null)}
         />

@@ -81,6 +81,17 @@ export interface Store {
   version: number;
   categories: Category[];
   connections: Connection[];
+  bookmarks: Bookmark[];
+}
+
+/** A folder to go back to, on a connection or local. */
+export interface Bookmark {
+  id: string;
+  name: string;
+  /** null: a local folder. */
+  connectionId: string | null;
+  /** Absolute path. */
+  path: string;
 }
 
 export const listHosts = () => invoke<HostEntry[]>("list_hosts");

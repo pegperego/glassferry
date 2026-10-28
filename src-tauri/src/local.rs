@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn lists_files_dirs_and_symlinks() {
-        let dir = std::env::temp_dir().join(format!("sfm-local-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gf-local-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("file.txt"), b"hello").unwrap();
         std::os::unix::fs::symlink(dir.join("sub"), dir.join("link")).unwrap();

@@ -7,14 +7,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
-use sshfilemanager_lib::log::Logger;
-use sshfilemanager_lib::runtime_dir;
-use sshfilemanager_lib::session::{Session, SshLauncher};
+use glassferry_lib::askpass::{AskpassServer, PromptKind};
+use glassferry_lib::log::Logger;
+use glassferry_lib::runtime_dir;
+use glassferry_lib::session::{Session, SshLauncher};
 use tokio::io::AsyncReadExt;
 
 fn main() {
-    if let Some(code) = sshfilemanager_lib::askpass::run_helper_if_requested() {
+    if let Some(code) = glassferry_lib::askpass::run_helper_if_requested() {
         std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().collect();
@@ -29,7 +29,7 @@ fn main() {
         let dir = runtime_dir::create().unwrap();
         let logger = Logger::new(
             Some(Arc::new(|batch| {
-                for e in batch.iter().filter(|e| e.status != sshfilemanager_lib::log::Status::Pending) {
+                for e in batch.iter().filter(|e| e.status != glassferry_lib::log::Status::Pending) {
                     println!("[log] {:?} {} {:?} {}ms {}", e.channel, e.op, e.status, e.duration_ms.unwrap_or(0), e.detail);
                 }
             })),

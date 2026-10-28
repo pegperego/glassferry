@@ -21,7 +21,7 @@ use crate::error::{AppError, Result};
 use crate::log::{sftp_equivalent, shell_line, Channel, LogOp, Logger};
 
 const CONTROL_PERSIST: &str = "ControlPersist=15m";
-const PROBE_MARKER: &str = "__SFM__";
+const PROBE_MARKER: &str = "__GF__";
 const PROBED_COMMANDS: &[&str] = &["rm", "cp", "mv", "du", "find", "sha256sum", "tar"];
 
 /// How ssh processes for one host are spawned.

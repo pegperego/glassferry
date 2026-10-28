@@ -20,9 +20,9 @@ function write<T>(key: string, value: T): void {
   }
 }
 
-/** `useState` persisted under `sfm.<key>`. */
+/** `useState` persisted under `gf.<key>`. */
 export function usePersistentState<T>(key: string, fallback: T): [T, (value: T) => void] {
-  const storageKey = `sfm.${key}`;
+  const storageKey = `gf.${key}`;
   const [value, setValue] = useState<T>(() => read(storageKey, fallback));
   const update = useCallback(
     (next: T) => {

@@ -323,7 +323,7 @@ function ConnectionForm(props: FormProps) {
       ...hosts.map((h) => ({ value: h.alias, label: "~/.ssh/config" })),
       ...store.connections
         .filter((c) => c.source.kind === "app" && c.id !== draft.id)
-        .map((c) => ({ value: `sfm-${c.id}`, label: c.name })),
+        .map((c) => ({ value: `gf-${c.id}`, label: c.name })),
     ],
     [hosts, store, draft.id],
   );

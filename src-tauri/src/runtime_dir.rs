@@ -2,7 +2,7 @@
 //!
 //! Unix socket paths are limited (~104 bytes on macOS) and ssh appends a
 //! random suffix while creating the ControlPath, so the directory path must
-//! stay short: `$XDG_RUNTIME_DIR/sfm` on Linux, `/tmp/sfm-<uid>` otherwise.
+//! stay short: `$XDG_RUNTIME_DIR/gf` on Linux, `/tmp/gf-<uid>` otherwise.
 
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
@@ -12,8 +12,8 @@ use crate::error::{AppError, Result};
 pub fn create() -> Result<PathBuf> {
     let uid = unsafe { libc::getuid() };
     let dir = match std::env::var_os("XDG_RUNTIME_DIR") {
-        Some(base) if cfg!(target_os = "linux") => PathBuf::from(base).join("sfm"),
-        _ => PathBuf::from(format!("/tmp/sfm-{uid}")),
+        Some(base) if cfg!(target_os = "linux") => PathBuf::from(base).join("gf"),
+        _ => PathBuf::from(format!("/tmp/gf-{uid}")),
     };
 
     match std::fs::DirBuilder::new().mode(0o700).create(&dir) {

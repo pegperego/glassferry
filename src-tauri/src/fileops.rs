@@ -362,7 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_rename_and_move_never_overwrite() {
-        let dir = std::env::temp_dir().join(format!("sfm-ops-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gf-ops-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("a.txt"), b"a").unwrap();

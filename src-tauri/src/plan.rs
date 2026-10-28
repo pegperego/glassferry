@@ -276,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_plans_preview_and_run_once() {
-        let dir = std::env::temp_dir().join(format!("sfm-plan-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gf-plan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), b"a").unwrap();

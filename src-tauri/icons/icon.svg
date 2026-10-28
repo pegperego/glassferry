@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="sq"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16395C"/><stop offset="1" stop-color="#0A1B30"/></linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#138A9E"/><stop offset="1" stop-color="#063A52"/></linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CFF7FF" stop-opacity=".42"/><stop offset="1" stop-color="#CFF7FF" stop-opacity=".1"/></linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000" flood-opacity=".4"/></filter>
+  </defs>
+  <g filter="url(#sh)"><rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/></g>
+  <g clip-path="url(#sq)">
+    <path d="M100 600 Q203 575 306 600 T512 600 T718 600 T924 600 V924 H100Z" fill="url(#sea)"/>
+  </g>
+  <g stroke="#BFF4FF" stroke-linejoin="round" stroke-width="9">
+    <rect x="352" y="370" width="150" height="130" rx="20" fill="url(#glass)"/>
+    <rect x="522" y="370" width="150" height="130" rx="20" fill="url(#glass)"/>
+    <path d="M196 520 H828 L742 742 Q734 760 714 760 H310 Q290 760 282 742 Z" fill="url(#glass)"/>
+  </g>
+  <g filter="url(#glow)" stroke="#7CF2E0" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M418 596 L486 646 L418 696"/><path d="M528 700 H606"/></g>
+</svg>

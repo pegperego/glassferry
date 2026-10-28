@@ -9,16 +9,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
-use sshfilemanager_lib::log::Logger;
-use sshfilemanager_lib::runtime_dir;
-use sshfilemanager_lib::session::{Session, SshLauncher};
-use sshfilemanager_lib::transfer::{
+use glassferry_lib::askpass::{AskpassServer, PromptKind};
+use glassferry_lib::log::Logger;
+use glassferry_lib::runtime_dir;
+use glassferry_lib::session::{Session, SshLauncher};
+use glassferry_lib::transfer::{
     copy_strategy, ConflictAction, CopyStrategy, Direction, JobInfo, JobState, TransferEvent, TransferManager,
 };
 
 fn main() {
-    if let Some(code) = sshfilemanager_lib::askpass::run_helper_if_requested() {
+    if let Some(code) = glassferry_lib::askpass::run_helper_if_requested() {
         std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().collect();
@@ -62,8 +62,8 @@ fn main() {
             };
             async move { Arc::new(Session::connect(launcher).await.expect("connect")) }
         };
-        let a = connect("sfm-local").await;
-        let b = connect("sfm-sftponly").await;
+        let a = connect("gf-local").await;
+        let b = connect("gf-sftponly").await;
 
         let conflicts = Arc::new(Mutex::new(Vec::new()));
         let cell: Arc<OnceLock<Arc<TransferManager>>> = Arc::new(OnceLock::new());
@@ -123,7 +123,7 @@ fn main() {
         .enumerate()
         {
             // SAFETY: single-threaded at this point (no job running).
-            unsafe { std::env::set_var("SFM_COPY_STRATEGY", strategy) };
+            unsafe { std::env::set_var("GF_COPY_STRATEGY", strategy) };
             let dst = work.join(format!("dst-{i}"));
             std::fs::create_dir_all(&dst).unwrap();
             let t = Instant::now();
@@ -137,7 +137,7 @@ fn main() {
             );
             check(label, info.state == JobState::Done && identical(&dst));
         }
-        unsafe { std::env::remove_var("SFM_COPY_STRATEGY") };
+        unsafe { std::env::remove_var("GF_COPY_STRATEGY") };
 
         // dst-3 already holds the two-session copy: every file conflicts.
         let dst = work.join("dst-3");
@@ -148,8 +148,8 @@ fn main() {
             info.state == JobState::Done && prompts.len() == 1 && identical(&dst),
         );
         println!("     conflict commands: {:?}", prompts.first());
-        let parts = walk(&work).into_iter().filter(|p| p.to_string_lossy().ends_with(".sfm-part")).count();
-        check("no .sfm-part left", parts == 0);
+        let parts = walk(&work).into_iter().filter(|p| p.to_string_lossy().ends_with(".gf-part")).count();
+        check("no .gf-part left", parts == 0);
 
         manager.clear_finished();
         drop(manager);

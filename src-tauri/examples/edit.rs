@@ -2,21 +2,21 @@
 //! window is opened): local saves are uploaded, unchanged saves are not,
 //! remote changes raise a conflict.
 //!
-//! cargo run --example edit -- "$PWD/../.dev-sshd/ssh" sfm-local segreta <work-dir>
+//! cargo run --example edit -- "$PWD/../.dev-sshd/ssh" gf-local segreta <work-dir>
 //! (the fixture server is localhost, so <work-dir> is also the "remote" path)
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
-use sshfilemanager_lib::edit::{ConflictChoice, EditEvent, EditManager, EditState};
-use sshfilemanager_lib::log::Logger;
-use sshfilemanager_lib::runtime_dir;
-use sshfilemanager_lib::session::{Session, SshLauncher};
+use glassferry_lib::askpass::{AskpassServer, PromptKind};
+use glassferry_lib::edit::{ConflictChoice, EditEvent, EditManager, EditState};
+use glassferry_lib::log::Logger;
+use glassferry_lib::runtime_dir;
+use glassferry_lib::session::{Session, SshLauncher};
 
 fn main() {
-    if let Some(code) = sshfilemanager_lib::askpass::run_helper_if_requested() {
+    if let Some(code) = glassferry_lib::askpass::run_helper_if_requested() {
         std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().collect();

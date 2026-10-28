@@ -1,6 +1,6 @@
 # Roadmap
 
-Sviluppi futuri di SSH File Manager. Ogni proposta ha la data in cui è nata e il motivo; quando viene realizzata passa in fondo, in "Fatto", con il commit.
+Sviluppi futuri di Glassferry. Ogni proposta ha la data in cui è nata e il motivo; quando viene realizzata passa in fondo, in "Fatto", con il commit.
 
 Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in analisi**, **in corso**.
 

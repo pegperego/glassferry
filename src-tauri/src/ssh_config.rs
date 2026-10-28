@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn collects_hosts_through_includes() {
-        let dir = std::env::temp_dir().join(format!("sfm-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gf-test-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("conf.d")).unwrap();
         std::fs::write(
             dir.join("config"),

@@ -1,7 +1,7 @@
 //! `SSH_ASKPASS` integration.
 //!
 //! The application binary doubles as the askpass helper: ssh runs it with
-//! `SFM_ASKPASS_SOCKET` set, the helper forwards the prompt over a Unix socket
+//! `GF_ASKPASS_SOCKET` set, the helper forwards the prompt over a Unix socket
 //! to the running app, which shows a dialog in the UI and sends the answer
 //! back. The helper prints it on stdout (or exits 1 when cancelled), which is
 //! the contract ssh expects from an askpass program.
@@ -24,10 +24,10 @@ use tokio::sync::oneshot;
 use crate::error::Result;
 use crate::log::{Channel, Logger};
 
-pub const ENV_SOCKET: &str = "SFM_ASKPASS_SOCKET";
-pub const ENV_TOKEN: &str = "SFM_ASKPASS_TOKEN";
-pub const ENV_ALIAS: &str = "SFM_ASKPASS_ALIAS";
-pub const ENV_ATTEMPT: &str = "SFM_ASKPASS_ATTEMPT";
+pub const ENV_SOCKET: &str = "GF_ASKPASS_SOCKET";
+pub const ENV_TOKEN: &str = "GF_ASKPASS_TOKEN";
+pub const ENV_ALIAS: &str = "GF_ASKPASS_ALIAS";
+pub const ENV_ATTEMPT: &str = "GF_ASKPASS_ATTEMPT";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct HelperRequest {
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn answers_once_from_keychain_then_asks_and_keeps_the_new_password() {
         tauri::async_runtime::block_on(async {
-            let dir = std::env::temp_dir().join(format!("sfm-askpass-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("gf-askpass-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             let shown: Arc<Mutex<Vec<AskpassRequest>>> = Arc::default();
             let sink = shown.clone();

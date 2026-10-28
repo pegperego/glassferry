@@ -8,7 +8,7 @@
 //! on both sides, without touching the local disk.
 //!
 //! A job copies a selection of entries from one directory to another,
-//! recursively. Files are written to a `.sfm-part` temporary and renamed into
+//! recursively. Files are written to a `.gf-part` temporary and renamed into
 //! place once complete, so the destination never holds a truncated file.
 //! Each file keeps several read/write requests in flight (the SFTP protocol
 //! is request/response: one request at a time would be latency-bound), and a
@@ -42,7 +42,7 @@ const PARALLEL_FILES: usize = 3;
 const REQUESTS_IN_FLIGHT: usize = 16;
 /// Bytes per request slot; the client splits it to the server limits.
 const CHUNK_LEN: u32 = 256 * 1024;
-const PART_SUFFIX: &str = ".sfm-part";
+const PART_SUFFIX: &str = ".gf-part";
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
 const MAX_REPORTED_ERRORS: usize = 50;
 
@@ -751,7 +751,7 @@ async fn scan_remote(job: &Job, src_dir: &str, names: &[String]) -> Result<Plan>
 
 // ---- data transfer -----------------------------------------------------------
 
-/// The requests of an overwrite: copy to `.sfm-part`, then replace.
+/// The requests of an overwrite: copy to `.gf-part`, then replace.
 fn overwrite_commands(job: &Job, direction: Direction, src: &str, dst: &str) -> Vec<String> {
     use crate::log::sftp_quote as q;
     let part = part_name(dst);
@@ -877,7 +877,7 @@ async fn upload(job: &Job, src: &Path, dst: &str, file: &PlannedFile) -> Result<
     finish_remote(&job.session, result, &part, dst, existed, file).await
 }
 
-/// Puts a completed `.sfm-part` in place on `session`: mtime, mode (new
+/// Puts a completed `.gf-part` in place on `session`: mtime, mode (new
 /// files only), then rename (posix-rename replaces in one step). On error
 /// the part file is removed.
 async fn finish_remote(
@@ -934,9 +934,9 @@ pub fn copy_strategy(src: &Arc<Session>, dst: &Arc<Session>) -> CopyStrategy {
     if !Arc::ptr_eq(src, dst) {
         CopyStrategy::Stream
     } else {
-        // Test hook: `SFM_COPY_STRATEGY=shell|stream` exercises the fallbacks
+        // Test hook: `GF_COPY_STRATEGY=shell|stream` exercises the fallbacks
         // on a server that has copy-data.
-        let forced = std::env::var("SFM_COPY_STRATEGY").unwrap_or_default();
+        let forced = std::env::var("GF_COPY_STRATEGY").unwrap_or_default();
         let has_cp = src.capabilities.commands.iter().any(|c| c == "cp");
         if src.sftp.support_copy() && forced.is_empty() {
             CopyStrategy::CopyData
@@ -1139,7 +1139,7 @@ mod tests {
 
     #[test]
     fn scans_local_tree_parents_first_and_skips_dir_symlinks() {
-        let dir = std::env::temp_dir().join(format!("sfm-scan-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gf-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("top/sub")).unwrap();
         std::fs::write(dir.join("top/a.txt"), b"aa").unwrap();

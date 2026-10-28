@@ -2,20 +2,20 @@
 //! upload a tree, download it back, re-upload with conflicts, cancel.
 //!
 //! scripts/test-sshd.sh start
-//! cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" sfm-local segreta <work-dir>
+//! cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" gf-local segreta <work-dir>
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
-use sshfilemanager_lib::log::{Logger, Status};
-use sshfilemanager_lib::runtime_dir;
-use sshfilemanager_lib::session::{Session, SshLauncher};
-use sshfilemanager_lib::transfer::{ConflictAction, Direction, JobInfo, JobState, TransferEvent, TransferManager};
+use glassferry_lib::askpass::{AskpassServer, PromptKind};
+use glassferry_lib::log::{Logger, Status};
+use glassferry_lib::runtime_dir;
+use glassferry_lib::session::{Session, SshLauncher};
+use glassferry_lib::transfer::{ConflictAction, Direction, JobInfo, JobState, TransferEvent, TransferManager};
 
 fn main() {
-    if let Some(code) = sshfilemanager_lib::askpass::run_helper_if_requested() {
+    if let Some(code) = glassferry_lib::askpass::run_helper_if_requested() {
         std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().collect();
@@ -143,7 +143,7 @@ fn main() {
         let leftovers = std::fs::read_dir(work.join("back/tree"))
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".sfm-part") || e.file_name() == "big.bin")
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".gf-part") || e.file_name() == "big.bin")
             .count();
         println!("cancel: state={:?} leftovers={leftovers}", info.state);
 

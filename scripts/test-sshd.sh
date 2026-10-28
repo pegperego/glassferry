@@ -5,12 +5,12 @@
 #   scripts/test-sshd.sh stop
 #
 # Hosts (use .dev-sshd/ssh as the ssh binary, it adds -F .dev-sshd/ssh_config):
-#   sfm-local      key with passphrase "segreta", host key prompt on first use
-#   sfm-sftponly   ForceCommand internal-sftp (no shell)
-#   sfm-rc         RemoteCommand + RequestTTY force in the client config
-#   sfm-slow       like sfm-local, through a relay adding 20 ms each way
+#   gf-local      key with passphrase "segreta", host key prompt on first use
+#   gf-sftponly   ForceCommand internal-sftp (no shell)
+#   gf-rc         RemoteCommand + RequestTTY force in the client config
+#   gf-slow       like gf-local, through a relay adding 20 ms each way
 #
-# Example: cargo run --example spike -- "$PWD/.dev-sshd/ssh" sfm-local segreta
+# Example: cargo run --example spike -- "$PWD/.dev-sshd/ssh" gf-local segreta
 
 set -eu
 
@@ -70,11 +70,11 @@ start() {
 
     write_sshd_config 2222 shell ""
     write_sshd_config 2223 sftponly "ForceCommand internal-sftp"
-    write_host sfm-local 2222 ""
-    write_host sfm-sftponly 2223 ""
-    write_host sfm-rc 2222 "  RemoteCommand echo hello
+    write_host gf-local 2222 ""
+    write_host gf-sftponly 2223 ""
+    write_host gf-rc 2222 "  RemoteCommand echo hello
   RequestTTY force"
-    write_host sfm-slow 2222 "  ProxyCommand python3 $ROOT/scripts/delay-relay.py 127.0.0.1 2222 20"
+    write_host gf-slow 2222 "  ProxyCommand python3 $ROOT/scripts/delay-relay.py 127.0.0.1 2222 20"
 
     printf '#!/bin/sh\nexec /usr/bin/ssh -F "%s/ssh_config" "$@"\n' "$DIR" > "$DIR/ssh"
     chmod +x "$DIR/ssh"

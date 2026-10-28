@@ -11,7 +11,7 @@ Analisi del 2026-10-27. Stato: tutte e quattro le fasi implementate. Voci colleg
 
 ## Modello dati
 
-Salvato in `~/Library/Application Support/sshfilemanager/connections.json` (Linux: `$XDG_CONFIG_HOME/sshfilemanager/`). Supporta import ed export, ma **le password non finiscono mai nel file**.
+Salvato in `~/Library/Application Support/glassferry/connections.json` (Linux: `$XDG_CONFIG_HOME/glassferry/`). Supporta import ed export, ma **le password non finiscono mai nel file**.
 
 ```jsonc
 {
@@ -43,11 +43,11 @@ Salvato in `~/Library/Application Support/sshfilemanager/connections.json` (Linu
 
 ## Connessioni configurate nell'app: `ssh_config` generato
 
-L'app scrive `~/Library/Application Support/sshfilemanager/ssh_config` (mode 0600) e avvia ssh con `-F <file>` solo per queste connessioni:
+L'app scrive `~/Library/Application Support/glassferry/ssh_config` (mode 0600) e avvia ssh con `-F <file>` solo per queste connessioni:
 
 ```
-# Generato da SSH File Manager: non modificare a mano.
-Host sfm-91bc
+# Generato da Glassferry: non modificare a mano.
+Host gf-91bc
   HostName 10.0.0.5
   User deploy
   Port 2222
@@ -64,7 +64,7 @@ Include ~/.ssh/config
   - Verificato con `ssh -G -F`: si risolvono sia gli host dell'app sia gli alias di `~/.ssh/config`.
 - **Precedenza:** in ssh vince il primo valore trovato, quindi le impostazioni della connessione hanno la precedenza sui default.
 - **Riscrittura del file:** il file viene riscritto, in modo atomico, a ogni modifica.
-- **Log:** mostra `ssh -F <file> sfm-91bc`, incollabile nel terminale.
+- **Log:** mostra `ssh -F <file> gf-91bc`, incollabile nel terminale.
 - **Validazione delle opzioni libere** (`extraOptions`): una per riga, nella forma `Chiave valore`. Il modulo le verifica prima del salvataggio con `ssh -G -F <file temporaneo>`. Il `ControlMaster`/`ControlPath` dell'utente resta ignorato, come oggi.
 - **Esporta in `~/.ssh/config`:** possibile in futuro, ma non è in questa fase.
 
@@ -72,7 +72,7 @@ Campi del modulo: nome, categoria, host, utente, porta, chiave (selezione file),
 
 ## Password nel Portachiavi
 
-- **Dove:** crate `keyring` (MIT/Apache), che usa il Portachiavi su macOS e il Secret Service su Linux. Servizio `sshfilemanager`, account `<id connessione>`.
+- **Dove:** crate `keyring` (MIT/Apache), che usa il Portachiavi su macOS e il Secret Service su Linux. Servizio `glassferry`, account `<id connessione>`.
 - **Scelta per connessione** (`savePassword`). Al primo prompt `secret`, il dialogo askpass mostra "Salva nel Portachiavi". La password viene salvata solo dopo che la connessione è riuscita.
 - **Risposta automatica:** alla connessione successiva l'askpass risponde da solo al **primo** prompt di password di quella connessione, senza mostrare dialoghi.
   - Se ssh richiede di nuovo (password cambiata), si mostra il dialogo con "La password salvata non è valida" e la si aggiorna. Così non si va mai in loop.
@@ -128,7 +128,7 @@ affiancati                                 impilati
 
 Nota dall'implementazione: sulla stessa connessione la prima scelta è l'estensione `copy-data`, non `cp -a`. Copia sul server file per file, funziona anche sugli account solo SFTP (OpenSSH ≥ 9.0) e non apre un canale shell per ogni file. Se manca si usa `cp -p` via shell, e in ultima istanza lo streaming. La copia di una cartella su sé stessa o dentro sé stessa viene rifiutata.
 
-Lo streaming riusa il motore attuale: il job diventa sorgente → destinazione, con `.sfm-part`, conflitti, mtime, progresso e annullamento. Il trascinamento tra due remoti copia; spostare tra server diversi resta fuori, perché unisce due operazioni distruttive.
+Lo streaming riusa il motore attuale: il job diventa sorgente → destinazione, con `.gf-part`, conflitti, mtime, progresso e annullamento. Il trascinamento tra due remoti copia; spostare tra server diversi resta fuori, perché unisce due operazioni distruttive.
 
 ## Connessioni protette
 

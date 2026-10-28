@@ -1,20 +1,20 @@
 //! Headless check of remote file operations against the sshd fixture.
 //!
-//! cargo run --example fileops -- "$PWD/../.dev-sshd/ssh" sfm-local segreta <remote-work-dir>
-//! (run it again with sfm-sftponly to exercise the SFTP-only fallbacks)
+//! cargo run --example fileops -- "$PWD/../.dev-sshd/ssh" gf-local segreta <remote-work-dir>
+//! (run it again with gf-sftponly to exercise the SFTP-only fallbacks)
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
-use sshfilemanager_lib::fileops::{remote, Target};
-use sshfilemanager_lib::plan::{PlanMethod, PlanRequest, Planner};
-use sshfilemanager_lib::log::{Logger, Status};
-use sshfilemanager_lib::runtime_dir;
-use sshfilemanager_lib::session::{Session, SshLauncher};
+use glassferry_lib::askpass::{AskpassServer, PromptKind};
+use glassferry_lib::fileops::{remote, Target};
+use glassferry_lib::plan::{PlanMethod, PlanRequest, Planner};
+use glassferry_lib::log::{Logger, Status};
+use glassferry_lib::runtime_dir;
+use glassferry_lib::session::{Session, SshLauncher};
 
 fn main() {
-    if let Some(code) = sshfilemanager_lib::askpass::run_helper_if_requested() {
+    if let Some(code) = glassferry_lib::askpass::run_helper_if_requested() {
         std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().collect();

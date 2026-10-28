@@ -8,16 +8,16 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use sshfilemanager_lib::askpass::{AskpassServer, PromptKind};
-use sshfilemanager_lib::connections::{self, keychain, Connection, ConnectionStore, Source, Store};
-use sshfilemanager_lib::log::Logger;
-use sshfilemanager_lib::runtime_dir;
-use sshfilemanager_lib::session::{Session, SshLauncher};
+use glassferry_lib::askpass::{AskpassServer, PromptKind};
+use glassferry_lib::connections::{self, keychain, Connection, ConnectionStore, Source, Store};
+use glassferry_lib::log::Logger;
+use glassferry_lib::runtime_dir;
+use glassferry_lib::session::{Session, SshLauncher};
 
 const SSH_BIN: &str = "/usr/bin/ssh";
 
 fn main() {
-    if let Some(code) = sshfilemanager_lib::askpass::run_helper_if_requested() {
+    if let Some(code) = glassferry_lib::askpass::run_helper_if_requested() {
         std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().collect();
@@ -82,7 +82,7 @@ fn main() {
         let connection_store = ConnectionStore::new(work.clone());
         connection_store.save(&store).unwrap();
         let generated = std::fs::read_to_string(connection_store.ssh_config_path()).unwrap();
-        check("generated ssh_config has both hosts", generated.contains("Host sfm-direct\n") && generated.contains("ProxyJump sfm-direct\n"));
+        check("generated ssh_config has both hosts", generated.contains("Host gf-direct\n") && generated.contains("ProxyJump gf-direct\n"));
 
         for connection in &store.connections {
             let target = connection_store.target(connection);

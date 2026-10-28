@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SSH File Manager",
+  "productName": "Glassferry",
   "version": "0.1.0",
-  "identifier": "dev.sshfilemanager.app",
+  "identifier": "app.glassferry",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SSH File Manager",
+        "title": "Glassferry",
         "width": 1200,
         "height": 760,
         "minWidth": 900,

@@ -1450,6 +1450,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "glassferry"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "glob",
+ "keyring",
+ "libc",
+ "notify",
+ "openssh-sftp-client",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "thiserror 2.0.21",
+ "tokio",
+ "trash",
+]
+
+[[package]]
 name = "glib"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3815,31 +3840,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be3c6519de7ca611f71ef7e8a56eb57aa1c818fecb5242d0a0f39c83776c210c"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "sshfilemanager"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "dirs",
- "futures-util",
- "glob",
- "keyring",
- "libc",
- "notify",
- "openssh-sftp-client",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "thiserror 2.0.21",
- "tokio",
- "trash",
 ]
 
 [[package]]

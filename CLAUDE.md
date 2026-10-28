@@ -1,4 +1,4 @@
-# SSH File Manager
+# Glassferry
 
 Open source (MIT) SFTP client with a GUI, macOS first, Linux supported. Tauri 2 + Rust backend, React + TypeScript frontend.
 
@@ -6,7 +6,7 @@ Open source (MIT) SFTP client with a GUI, macOS first, Linux supported. Tauri 2 
 
 Never parse or reinterpret the user's `~/.ssh/config`. All connections go through the system `ssh` binary (default `/usr/bin/ssh`), so Include/Match/ProxyJump/IdentityAgent work exactly as in the terminal. Nothing is ever installed on servers.
 
-- Connections (`connections.rs`): the app's list in `~/Library/Application Support/sshfilemanager/connections.json` (Linux: `$XDG_CONFIG_HOME/sshfilemanager/`), with categories (color, `protected`). A connection is either an alias of `~/.ssh/config` (only the alias is stored) or configured in the app: those are written as `Host sfm-<id>` blocks to a generated `ssh_config` (0600) ending with `Match all` + `Include ~/.ssh/config` + `Include /etc/ssh/ssh_config`, and ssh runs with `-F <file>`. We write the config, ssh interprets it. Extra options are validated (`Host`/`Match`/`Include` refused) and checked with `ssh -G -F <temp file>` (`connection_check`).
+- Connections (`connections.rs`): the app's list in `~/Library/Application Support/glassferry/connections.json` (Linux: `$XDG_CONFIG_HOME/glassferry/`), with categories (color, `protected`). A connection is either an alias of `~/.ssh/config` (only the alias is stored) or configured in the app: those are written as `Host gf-<id>` blocks to a generated `ssh_config` (0600) ending with `Match all` + `Include ~/.ssh/config` + `Include /etc/ssh/ssh_config`, and ssh runs with `-F <file>`. We write the config, ssh interprets it. Extra options are validated (`Host`/`Match`/`Include` refused) and checked with `ssh -G -F <temp file>` (`connection_check`).
 - Host aliases for the import: collected by `ssh_config.rs` (follows `Include`, skips wildcard/negated patterns). Effective settings only via `ssh -G` (`connections::resolve`).
 - Connection (`session.rs`): the app owns a ControlMaster (`ssh [-F file] -M -N -f -o ControlPersist=15m -S <sock> -E <log> -- alias`); channels reuse it with `-S <sock> -o ControlMaster=no -o RemoteCommand=none -T`. `SshLauncher.alias` is the ssh target, `label` (the connection name) is what the log, transfers, edits and prompts show.
 - SFTP: `ssh -s -- alias sftp`, stdin/stdout handed to `openssh_sftp_client::Sftp::new`. We do NOT use the `openssh` crate (it injects its own options).
@@ -15,25 +15,25 @@ Never parse or reinterpret the user's `~/.ssh/config`. All connections go throug
 
 ## Askpass
 
-The app binary is also the `SSH_ASKPASS` helper (`askpass.rs`): when started with `SFM_ASKPASS_SOCKET` it forwards the prompt to the running app over a Unix socket (token-authenticated) and prints the answer. The app emits `askpass-request` to the UI; the UI answers with the `askpass_respond` command. Prompt kinds: `secret`, `confirm`, `notice`, `hostKey`.
+The app binary is also the `SSH_ASKPASS` helper (`askpass.rs`): when started with `GF_ASKPASS_SOCKET` it forwards the prompt to the running app over a Unix socket (token-authenticated) and prints the answer. The app emits `askpass-request` to the UI; the UI answers with the `askpass_respond` command. Prompt kinds: `secret`, `confirm`, `notice`, `hostKey`.
 
-Saved passwords (`savePassword` per connection) live in the system keychain (`keyring` crate, service `sshfilemanager`, account = connection id), never in files. `connect` registers an askpass *attempt*: the saved password answers the first password prompt only (no dialog); if ssh asks again the dialog says it was rejected. A password typed with "Salva nel Portachiavi" checked is stored only after the connection succeeded. Passphrases, OTP and confirmations are never saved. Removing a connection (or turning saving off) deletes its keychain item.
+Saved passwords (`savePassword` per connection) live in the system keychain (`keyring` crate, service `glassferry`, account = connection id), never in files. `connect` registers an askpass *attempt*: the saved password answers the first password prompt only (no dialog); if ssh asks again the dialog says it was rejected. A password typed with "Salva nel Portachiavi" checked is stored only after the connection succeeded. Passphrases, OTP and confirmations are never saved. Removing a connection (or turning saving off) deletes its keychain item.
 
-Runtime files (sockets, ssh logs) live in a short private dir (`runtime_dir.rs`): `/tmp/sfm-<uid>` or `$XDG_RUNTIME_DIR/sfm`, mode 0700. Socket paths must stay short (~104 bytes on macOS).
+Runtime files (sockets, ssh logs) live in a short private dir (`runtime_dir.rs`): `/tmp/gf-<uid>` or `$XDG_RUNTIME_DIR/gf`, mode 0700. Socket paths must stay short (~104 bytes on macOS).
 
 ## Activity log
 
-Every ssh process, SFTP request, exec command, askpass prompt and local operation goes through `log.rs` (`Logger::start(...)` returns a `LogOp`; finish it with `ok`/`fail`/`result`, dropping it unfinished records an error). Entries carry the exact command line (`shell_line`) and, when useful, a terminal equivalent (`sftp_equivalent`). Ring buffer (default 1000, set from the UI), batched `log-batch` events every 100 ms, rotating text file in `~/Library/Logs/SSH File Manager/` (Linux: `$XDG_STATE_HOME/sshfilemanager/logs`). Never log askpass answers, tokens or the ssh environment. New backend operations must be logged.
+Every ssh process, SFTP request, exec command, askpass prompt and local operation goes through `log.rs` (`Logger::start(...)` returns a `LogOp`; finish it with `ok`/`fail`/`result`, dropping it unfinished records an error). Entries carry the exact command line (`shell_line`) and, when useful, a terminal equivalent (`sftp_equivalent`). Ring buffer (default 1000, set from the UI), batched `log-batch` events every 100 ms, rotating text file in `~/Library/Logs/Glassferry/` (Linux: `$XDG_STATE_HOME/glassferry/logs`). Never log askpass answers, tokens or the ssh environment. New backend operations must be logged.
 
 Diagnostic mode per connection (UI toggle, stored in localStorage) passes `verbose` to `connect`: the master runs with `-v` and its debug output is attached to the connect entry.
 
 ## Transfers
 
-`transfer.rs` (`TransferManager`): a job copies a selection between a local and a remote directory, recursively (symlinks to directories are not followed). Files go to `<name>.sfm-part` and are renamed into place (remote rename uses posix-rename when available); mtime is preserved, permissions only for new files. Each file keeps 16 requests of 256 KiB in flight (`File` clones with `start_seek`); at most 3 files run at once across all jobs. Conflicts are asked one at a time per job (`transfer-conflict` event, answered with `transfer_conflict_respond`, optional apply-to-all). Progress goes to the UI as `transfer-update` every 200 ms. Every scan, mkdir, file and job is logged.
+`transfer.rs` (`TransferManager`): a job copies a selection between a local and a remote directory, recursively (symlinks to directories are not followed). Files go to `<name>.gf-part` and are renamed into place (remote rename uses posix-rename when available); mtime is preserved, permissions only for new files. Each file keeps 16 requests of 256 KiB in flight (`File` clones with `start_seek`); at most 3 files run at once across all jobs. Conflicts are asked one at a time per job (`transfer-conflict` event, answered with `transfer_conflict_respond`, optional apply-to-all). Progress goes to the UI as `transfer-update` every 200 ms. Every scan, mkdir, file and job is logged.
 
-Remote → remote copies (`Direction::Remote`, `transfer_start(..., dstSessionId)`): within one session the server copies (`copy-data` SFTP extension when `support_copy()`, else `cp -p` through the shell), between two sessions the data streams through the app (`relay_to`: reads and writes both pipelined, no local file). Copying onto itself or into its own subtree within one session is refused (`check_same_session_copy`). Conflicts, `.sfm-part`, mtime and progress work as for uploads; the conflict's `host` is the destination. Check: `cargo run --release --example remote_copy -- "$PWD/../.dev-sshd/ssh" segreta <work-dir>` (`SFM_COPY_STRATEGY=shell|stream` forces the fallbacks, test hook).
+Remote → remote copies (`Direction::Remote`, `transfer_start(..., dstSessionId)`): within one session the server copies (`copy-data` SFTP extension when `support_copy()`, else `cp -p` through the shell), between two sessions the data streams through the app (`relay_to`: reads and writes both pipelined, no local file). Copying onto itself or into its own subtree within one session is refused (`check_same_session_copy`). Conflicts, `.gf-part`, mtime and progress work as for uploads; the conflict's `host` is the destination. Check: `cargo run --release --example remote_copy -- "$PWD/../.dev-sshd/ssh" segreta <work-dir>` (`GF_COPY_STRATEGY=shell|stream` forces the fallbacks, test hook).
 
-Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" sfm-slow segreta <work-dir>` (`sfm-slow` adds 20 ms each way through `scripts/delay-relay.py`). Reference: ~17 MiB/s pipelined vs ~5 MiB/s sequential; OpenSSH `sftp` ~22 MiB/s on the same path.
+Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" gf-slow segreta <work-dir>` (`gf-slow` adds 20 ms each way through `scripts/delay-relay.py`). Reference: ~17 MiB/s pipelined vs ~5 MiB/s sequential; OpenSSH `sftp` ~22 MiB/s on the same path.
 
 UI triggers: button Carica/Scarica and F5 in the active pane (from the local pane: the remote pane used last; ⇧F5 and the context menu list every destination), drag & drop between any two panes (onto a folder row = into that folder; between remote panes it copies, never moves; ⇧F5 in a remote pane offers "Copia su <altro>"), files dropped from the Finder on a remote pane (Tauri `onDragDropEvent`, pane found through `data-pane`). Pane-to-pane drags do NOT use HTML5 drag & drop: in the native macOS window Tauri's drag-drop handler claims every drag, so `dragover`/`drop` never reach the page (it works in Chromium, which hides the bug). `pointerDrag.ts` tracks the pointer instead (`beginPointerDrag` on row `onPointerDown`, drop zones registered per pane, hit test via `data-pane` / `data-entry` / `data-dir`, `DragGhost` label). Playwright checks must drag with `page.mouse` and block HTML5 drag events in the init script. Progress is shown in the bottom panel's Trasferimenti tab, with the host's category color and a host filter.
 
@@ -49,13 +49,13 @@ Protected categories (`Category.protected`) require typing the connection name (
 
 ## File operations
 
-`fileops.rs`, commands `fs_mkdir`/`fs_rename`/`fs_move`/`fs_delete` with a `Target` (`{kind:"local"}` or `{kind:"remote", sessionId}`). Names are validated (`validate_name`: no `/`, `.`, `..`, empty). Rename and move never overwrite (destination checked first). Local delete = Trash (`trash` crate, NSFileManager method: no Finder permission prompt). Remote delete is permanent: `rm -rf -- "$@"` via `sh_command` when the probe found `rm`, recursive SFTP walk otherwise (symlinks removed, never followed); `/` and the home dir are refused. Remote move falls back to `mv` when SFTP rename fails (e.g. across filesystems). Check against the fixture: `cargo run --example fileops -- "$PWD/../.dev-sshd/ssh" sfm-local segreta <work-dir>` (and `sfm-sftponly`).
+`fileops.rs`, commands `fs_mkdir`/`fs_rename`/`fs_move`/`fs_delete` with a `Target` (`{kind:"local"}` or `{kind:"remote", sessionId}`). Names are validated (`validate_name`: no `/`, `.`, `..`, empty). Rename and move never overwrite (destination checked first). Local delete = Trash (`trash` crate, NSFileManager method: no Finder permission prompt). Remote delete is permanent: `rm -rf -- "$@"` via `sh_command` when the probe found `rm`, recursive SFTP walk otherwise (symlinks removed, never followed); `/` and the home dir are refused. Remote move falls back to `mv` when SFTP rename fails (e.g. across filesystems). Check against the fixture: `cargo run --example fileops -- "$PWD/../.dev-sshd/ssh" gf-local segreta <work-dir>` (and `gf-sftponly`).
 
 UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
 
 ## Editing remote files
 
-`edit.rs` (`EditManager`): `edit_open` downloads into `~/Library/Caches/sshfilemanager/edit/<hash>/<name>` (max 100 MB), opens it with `open`/`xdg-open` and watches the directory with `notify` (editors save atomically). After a 500 ms debounce, a content change (SHA-256) is uploaded by writing the remote file in place (owner/mode preserved). Before uploading, the remote file is compared with the opened version (size, mtime, and SHA-256 via `sha256sum` when the probe found it): on mismatch an `edit-conflict` asks overwrite / reload (local copy kept as "<name> (mia versione)") / keep. Local copies are removed on close, on disconnect, and on exit only when synced. Check: `cargo run --example edit -- "$PWD/../.dev-sshd/ssh" sfm-local segreta <work-dir>`.
+`edit.rs` (`EditManager`): `edit_open` downloads into `~/Library/Caches/glassferry/edit/<hash>/<name>` (max 100 MB), opens it with `open`/`xdg-open` and watches the directory with `notify` (editors save atomically). After a 500 ms debounce, a content change (SHA-256) is uploaded by writing the remote file in place (owner/mode preserved). Before uploading, the remote file is compared with the opened version (size, mtime, and SHA-256 via `sha256sum` when the probe found it): on mismatch an `edit-conflict` asks overwrite / reload (local copy kept as "<name> (mia versione)") / keep. Local copies are removed on close, on disconnect, and on exit only when synced. Check: `cargo run --example edit -- "$PWD/../.dev-sshd/ssh" gf-local segreta <work-dir>`.
 
 UI: double click / Enter on a remote file = edit, on a local file = open with the default app; the bottom panel's "File aperti" tab lists open files.
 
@@ -83,7 +83,8 @@ Frontend (`src/`):
 - `paths.ts` (remote POSIX paths), `format.ts`, `settings.ts` (`usePersistentState`, localStorage with safe fallbacks)
 
 Other:
-- `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`, `sfm-slow`); `scripts/delay-relay.py` adds latency for `sfm-slow`
+- `src-tauri/icons/icon.svg` — icon source; regenerate every size with `pnpm tauri icon <1024 px png>` (drop the android/ios outputs)
+- `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `gf-local`, `gf-sftponly`, `gf-rc`, `gf-slow`); `scripts/delay-relay.py` adds latency for `gf-slow`
 - `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (all four phases implemented)
 
 ## Commands
@@ -95,7 +96,7 @@ pnpm build                         # tsc + vite build (frontend type-check)
 pnpm test                          # vitest (pure TS modules)
 cd src-tauri && cargo test && cargo clippy --all-targets
 scripts/test-sshd.sh start         # test servers on 127.0.0.1:2222/2223
-cd src-tauri && cargo run --release --example spike -- "$PWD/../.dev-sshd/ssh" sfm-local segreta [remote-file]
+cd src-tauri && cargo run --release --example spike -- "$PWD/../.dev-sshd/ssh" gf-local segreta [remote-file]
 scripts/test-sshd.sh stop
 ```
 

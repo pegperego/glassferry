@@ -160,7 +160,7 @@ impl EditManager {
     }
 
     pub fn default_root() -> Option<PathBuf> {
-        dirs::cache_dir().map(|d| d.join("sshfilemanager/edit"))
+        dirs::cache_dir().map(|d| d.join("glassferry/edit"))
     }
 
     pub fn list(&self) -> Vec<EditInfo> {

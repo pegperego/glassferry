@@ -1,4 +1,4 @@
-# SSH File Manager
+# Glassferry
 
 A free, open source SFTP client for macOS and Linux that uses your system OpenSSH. It honours your `~/.ssh/config` exactly as the terminal does: `Include`, `Match`, `ProxyJump`, `IdentityAgent` (1Password and other agents), `RemoteCommand`. Nothing is installed on the server: only the standard SFTP subsystem is used, plus ordinary shell commands when the account allows them.
 
@@ -47,10 +47,10 @@ Status: MVP complete, not yet released. The interface is in Italian for now.
 | What | Where |
 |---|---|
 | Passwords, passphrases and askpass answers | Never logged; passwords saved only in the system keychain when enabled for a connection |
-| Connections | `~/Library/Application Support/sshfilemanager/connections.json` and the generated `ssh_config` (mode 0600), no secrets |
-| Activity log | `~/Library/Logs/SSH File Manager/` (Linux: `$XDG_STATE_HOME/sshfilemanager/logs`) |
-| Local copies of files being edited | `~/Library/Caches/sshfilemanager/edit/`. Removed when closed, and on exit once synced |
-| Control sockets | `/tmp/sfm-<uid>` (mode 0700) |
+| Connections | `~/Library/Application Support/glassferry/connections.json` and the generated `ssh_config` (mode 0600), no secrets |
+| Activity log | `~/Library/Logs/Glassferry/` (Linux: `$XDG_STATE_HOME/glassferry/logs`) |
+| Local copies of files being edited | `~/Library/Caches/glassferry/edit/`. Removed when closed, and on exit once synced |
+| Control sockets | `/tmp/gf-<uid>` (mode 0700) |
 
 ## Requirements
 

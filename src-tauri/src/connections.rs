@@ -3,7 +3,7 @@
 //!
 //! A connection either points to an alias of `~/.ssh/config` (we store only
 //! the alias and our metadata) or carries its own settings. The latter are
-//! written as `Host sfm-<id>` blocks to a generated file that ends with
+//! written as `Host gf-<id>` blocks to a generated file that ends with
 //! `Include ~/.ssh/config`, and ssh is started with `-F <file>`: ssh still
 //! interprets everything, we only write the config. Passwords never go to
 //! these files: they live in the system keychain (`keyring`).
@@ -21,7 +21,7 @@ use crate::error::{AppError, Result};
 const STORE_FILE: &str = "connections.json";
 const SSH_CONFIG_FILE: &str = "ssh_config";
 const STORE_VERSION: u32 = 1;
-const KEYCHAIN_SERVICE: &str = "sshfilemanager";
+const KEYCHAIN_SERVICE: &str = "glassferry";
 /// Keywords that would break the structure of the generated file.
 const FORBIDDEN_KEYWORDS: &[&str] = &["host", "match", "include"];
 
@@ -220,7 +220,7 @@ fn parse_option(line: &str) -> Result<(&str, &str)> {
 
 /// Alias of an app connection inside the generated config.
 pub fn app_alias(id: &str) -> String {
-    format!("sfm-{id}")
+    format!("gf-{id}")
 }
 
 fn quote_value(value: &str) -> String {
@@ -270,7 +270,7 @@ fn host_block(alias: &str, source: &Source) -> String {
 /// aliases used as ProxyJump. `-F` skips the system file, so it is included
 /// too, as ssh would read it last without `-F`.
 pub fn render_ssh_config<'a>(blocks: impl IntoIterator<Item = (String, &'a Source)>) -> String {
-    let mut out = String::from("# Generato da SSH File Manager: non modificare a mano.\n\n");
+    let mut out = String::from("# Generato da Glassferry: non modificare a mano.\n\n");
     for (alias, source) in blocks {
         out.push_str(&host_block(&alias, source));
     }
@@ -305,9 +305,9 @@ pub struct ConnectionStore {
 }
 
 impl ConnectionStore {
-    /// `~/Library/Application Support/sshfilemanager` (Linux: `$XDG_CONFIG_HOME/sshfilemanager`).
+    /// `~/Library/Application Support/glassferry` (Linux: `$XDG_CONFIG_HOME/glassferry`).
     pub fn default_dir() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("sshfilemanager"))
+        dirs::config_dir().map(|d| d.join("glassferry"))
     }
 
     pub fn new(dir: PathBuf) -> Self {
@@ -385,7 +385,7 @@ pub async fn check_source(ssh_bin: &Path, scratch_dir: &Path, source: &Source) -
         Source::SshConfig { alias } => resolve(ssh_bin, None, alias).await,
         Source::App { .. } => {
             let file = scratch_dir.join(format!("check-{}.conf", crate::runtime_dir::random_token()?));
-            let alias = "sfm-check";
+            let alias = "gf-check";
             write_private(&file, render_ssh_config([(alias.to_string(), source)]).as_bytes())?;
             let result = resolve(ssh_bin, Some(&file), alias).await;
             let _ = std::fs::remove_file(&file);
@@ -483,14 +483,14 @@ mod tests {
     fn renders_app_blocks_before_user_config() {
         let ssh_config = Source::SshConfig { alias: "web".into() };
         let source = app_source();
-        let out = render_ssh_config([("sfm-a".to_string(), &source), ("sfm-b".to_string(), &ssh_config)]);
+        let out = render_ssh_config([("gf-a".to_string(), &source), ("gf-b".to_string(), &ssh_config)]);
         assert!(
             out.contains(
-                "Host sfm-a\n  HostName 10.0.0.5\n  User deploy\n  Port 2222\n  IdentityFile \"~/.ssh/my key\"\n  ProxyJump bastion\n  ServerAliveInterval 30\n\n"
+                "Host gf-a\n  HostName 10.0.0.5\n  User deploy\n  Port 2222\n  IdentityFile \"~/.ssh/my key\"\n  ProxyJump bastion\n  ServerAliveInterval 30\n\n"
             ),
             "{out}"
         );
-        assert!(!out.contains("sfm-b"));
+        assert!(!out.contains("gf-b"));
         assert!(out.ends_with("Match all\nInclude ~/.ssh/config\nInclude /etc/ssh/ssh_config\n"));
     }
 
@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn saves_and_loads_with_private_permissions() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("sfm-conn-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gf-conn-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let store_dir = ConnectionStore::new(dir.clone());
         assert_eq!(store_dir.load().unwrap(), Store::default());
@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(store_dir.load().unwrap(), store);
         let mode = std::fs::metadata(store_dir.ssh_config_path()).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
-        assert!(std::fs::read_to_string(store_dir.ssh_config_path()).unwrap().contains("Host sfm-c1\n"));
+        assert!(std::fs::read_to_string(store_dir.ssh_config_path()).unwrap().contains("Host gf-c1\n"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

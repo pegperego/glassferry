@@ -118,13 +118,13 @@ impl Logger {
         logger
     }
 
-    /// Default log directory: ~/Library/Logs/SSH File Manager on macOS,
-    /// $XDG_STATE_HOME/sshfilemanager/logs elsewhere.
+    /// Default log directory: ~/Library/Logs/Glassferry on macOS,
+    /// $XDG_STATE_HOME/glassferry/logs elsewhere.
     pub fn default_dir() -> Option<PathBuf> {
         if cfg!(target_os = "macos") {
-            dirs::home_dir().map(|h| h.join("Library/Logs/SSH File Manager"))
+            dirs::home_dir().map(|h| h.join("Library/Logs/Glassferry"))
         } else {
-            dirs::state_dir().map(|d| d.join("sshfilemanager/logs"))
+            dirs::state_dir().map(|d| d.join("glassferry/logs"))
         }
     }
 
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn writes_completed_entries_to_file_and_rotates() {
-        let dir = std::env::temp_dir().join(format!("sfm-log-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gf-log-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let logger = Logger::new(None, Some(dir.clone()));
         let mut op = logger.start(Some("web"), Channel::Ssh, "connect", "ssh -- web");

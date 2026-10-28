@@ -16,7 +16,7 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 **Perché.** Una libreria SSH (libssh2, russh) dovrebbe reimplementare il parsing del config, `Match exec`, `ProxyJump` a catena, gli agent, `UseKeychain` di Apple, le chiavi FIDO. Non arriverebbe mai al 100%, e ogni differenza è un bug che l'utente vede come "nel terminale funziona". Con il binario di sistema il comportamento è per costruzione quello del terminale.
 
 **Come.**
-- L'app avvia un proprio ControlMaster: `ssh -M -N -f -o ControlPersist=15m -S <socket> -E <log> -- alias`. Il socket è in una cartella privata e corta (`/tmp/sfm-<uid>`, 0700), perché i path dei socket Unix sono limitati a circa 104 byte su macOS. Non riusa il `ControlPath` dell'utente, per non interferire con le sue sessioni.
+- L'app avvia un proprio ControlMaster: `ssh -M -N -f -o ControlPersist=15m -S <socket> -E <log> -- alias`. Il socket è in una cartella privata e corta (`/tmp/gf-<uid>`, 0700), perché i path dei socket Unix sono limitati a circa 104 byte su macOS. Non riusa il `ControlPath` dell'utente, per non interferire con le sue sessioni.
 - I canali successivi (SFTP, comandi) riusano il master senza riautenticarsi: `-S <socket> -o ControlMaster=no -o RemoteCommand=none -T`. `RemoteCommand=none` e `-T` servono perché con `RemoteCommand` o `RequestTTY force` nel config ssh rifiuterebbe il sottosistema o il comando.
 - Ogni opzione aggiunta oltre a queste va giustificata: il principio è non sovrascrivere il config.
 
@@ -67,7 +67,7 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 
 ## 6. Trasferimenti
 
-- Ogni file si scrive come `<nome>.sfm-part` e si rinomina a fine copia, così la destinazione non contiene mai un file troncato.
+- Ogni file si scrive come `<nome>.gf-part` e si rinomina a fine copia, così la destinazione non contiene mai un file troncato.
 - Si conservano mtime e, solo per i file nuovi, i permessi.
 - I link a cartelle non vengono seguiti, per evitare cicli.
 
@@ -81,7 +81,7 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 
 ## 7. Modifica dei file remoti
 
-- Il file viene scaricato in `~/Library/Caches/sshfilemanager/edit/<hash>/<nome>`, così l'editor mostra il nome giusto, e aperto con l'app predefinita.
+- Il file viene scaricato in `~/Library/Caches/glassferry/edit/<hash>/<nome>`, così l'editor mostra il nome giusto, e aperto con l'app predefinita.
 - Si osserva la **cartella**, non il file: molti editor salvano in modo atomico, scrivendo un file nuovo e rinominandolo. Debounce di 500 ms, e si carica solo se il contenuto (SHA-256) è cambiato.
 - **Scrittura diretta** sul file remoto (troncamento e scrittura) invece di temporaneo + rename. Mantiene proprietario, permessi e ACL; il prezzo è un file parziale se la connessione cade a metà. Decisione presa all'inizio del progetto.
 - Prima di caricare si confronta il file remoto con la versione aperta. Se è cambiato, si chiede: sovrascrivi, usa la versione del server (la propria resta come "(mia versione)"), oppure decidi dopo.
@@ -102,7 +102,7 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 L'app tiene un proprio elenco di connessioni, con nome e categoria colorata. Il progetto completo è in [`connections.md`](connections.md).
 
 - **Alias di `~/.ssh/config`:** l'app salva solo l'alias e i propri metadati, e ssh legge il tuo config come sempre.
-- **Connessioni configurate nell'app:** l'app scrive un `ssh_config` suo, con un blocco `Host sfm-<id>` per ognuna, e avvia ssh con `-F`.
+- **Connessioni configurate nell'app:** l'app scrive un `ssh_config` suo, con un blocco `Host gf-<id>` per ognuna, e avvia ssh con `-F`.
   - Il file termina con `Match all`, `Include ~/.ssh/config` e `Include /etc/ssh/ssh_config`. Così valgono i tuoi default (1Password, `Host *`), ProxyJump può puntare ai tuoi alias, e il file di sistema viene letto anche se `-F` lo escluderebbe.
   - Il principio non cambia: l'app scrive il config, ma è sempre ssh a interpretarlo.
   - Verificato sul server di test, compreso ProxyJump tra due connessioni dell'app: ssh passa `-F` anche al processo del jump.
@@ -140,3 +140,9 @@ Lo spostamento tra server diversi non è previsto, perché unirebbe due operazio
 Fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` e di leggere `~/.ssh`. Build firmata e notarizzata, arm64 e x64 (in roadmap).
 
 Un'app aperta dal Finder non legge `.zshrc`: chi esporta `SSH_AUTH_SOCK` dalla shell invece di usare `IdentityAgent` non avrà quell'agent. Il `SSH_AUTH_SOCK` di launchd invece è disponibile.
+
+## 15. Nome: Glassferry
+
+Il nome unisce *ferry* (traghetto: i file vanno e vengono tra le sponde) e *glass*: l'app è trasparente, mostra i comandi esatti prima e dopo ogni operazione. L'icona (`src-tauri/icons/icon.svg`) è uno scafo di vetro con dentro un prompt `>_`; le due finestre della cabina sono i due pannelli remoti. Le dimensioni si rigenerano con `pnpm tauri icon <png 1024>`.
+
+Prima del 2026-10-28 l'app si chiamava "SSH File Manager" (cartelle e servizio del Portachiavi `sshfilemanager`). Era un'alpha senza utenti, quindi nessuna migrazione: nome, percorsi, identifier (`dev.sshfilemanager.app` → `app.glassferry`) e prefisso interno (`sfm` → `gf`: `Host gf-<id>`, `.gf-part`, `GF_*`, `/tmp/gf-<uid>`, chiavi localStorage `gf.*`) sono cambiati e basta.

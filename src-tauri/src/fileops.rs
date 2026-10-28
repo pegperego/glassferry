@@ -124,6 +124,7 @@ pub mod local {
         );
         op.equivalent(format!("mv {} ~/.Trash/", shell_line(&paths)));
         let result = tokio::task::spawn_blocking(move || {
+            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
             let mut context = trash::TrashContext::new();
             #[cfg(target_os = "macos")]
             {

@@ -9,7 +9,12 @@ interface Props {
   onClose: () => void;
 }
 
-/** "Nuovo collegamento" (⌘K): search a connection, Enter connects. */
+/**
+ * "Nuovo collegamento" (⌘K): search a connection, Enter or double click connects.
+ * A single click only moves the cursor: connecting on click closed the palette
+ * under the pointer, so the second click of an instinctive double click landed
+ * on the pane below and opened a folder or a file.
+ */
 export function QuickConnect({ store, onConnect, onManage, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -66,7 +71,8 @@ export function QuickConnect({ store, onConnect, onManage, onClose }: Props) {
                         key={connection.id}
                         className={index === cursor ? "palette-item cursor" : "palette-item"}
                         onMouseMove={() => setCursor(index)}
-                        onClick={() => onConnect(connection.id)}
+                        onClick={() => setCursor(index)}
+                        onDoubleClick={() => onConnect(connection.id)}
                       >
                         <span
                           className="category-bar"
@@ -85,7 +91,7 @@ export function QuickConnect({ store, onConnect, onManage, onClose }: Props) {
           </ul>
         )}
         <div className="palette-footer muted small">
-          <span>↑↓ scegli · ⏎ connetti · esc chiudi</span>
+          <span>↑↓ scegli · ⏎ o doppio clic connetti · esc chiudi</span>
           <span className="spacer" />
           <button onClick={onManage}>Gestisci connessioni…</button>
         </div>

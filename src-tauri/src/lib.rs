@@ -1,5 +1,6 @@
 pub mod askpass;
 pub mod attrs;
+pub mod dirsize;
 pub mod connections;
 pub mod edit;
 pub mod entry;
@@ -458,6 +459,15 @@ async fn fs_attrs(
     }
 }
 
+/// Sizes of the folders `names` in `dir` (du on the server, or a walk).
+#[tauri::command]
+async fn fs_dir_size(state: State<'_, AppState>, target: Target, dir: String, names: Vec<String>) -> Result<Vec<dirsize::DirSize>> {
+    match target {
+        Target::Local => dirsize::local::sizes(&state.logger, &dir, &names).await,
+        Target::Remote { session_id } => dirsize::remote::sizes(&*state.session(session_id)?, &dir, &names).await,
+    }
+}
+
 /// Prepares a delete, move or rename and returns its preview.
 #[tauri::command]
 async fn fs_plan(state: State<'_, AppState>, target: Target, request: PlanRequest) -> Result<PlanPreview> {
@@ -673,6 +683,7 @@ pub fn run() {
             fs_move,
             fs_delete,
             fs_attrs,
+            fs_dir_size,
             fs_plan,
             fs_plan_execute,
             fs_plan_discard,

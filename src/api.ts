@@ -295,6 +295,19 @@ export interface AttrChange {
 export const fsAttrs = (target: Target, dir: string, names: string[], change: AttrChange, dryRun: boolean) =>
   invoke<string[]>("fs_attrs", { target, dir, names, change, dryRun });
 
+export interface DirSize {
+  name: string;
+  bytes: number;
+  /** Disk usage (`du -k`) rather than the sum of file sizes. */
+  approx: boolean;
+  /** Some content could not be read. */
+  partial: boolean;
+}
+
+/** Sizes of folders in `dir`: du on the server, or a walk. */
+export const fsDirSize = (target: Target, dir: string, names: string[]) =>
+  invoke<DirSize[]>("fs_dir_size", { target, dir, names });
+
 /** Opens the system terminal in `path` (remote: a new ssh connection that changes to it). */
 export const openTerminal = (target: Target, path: string) => invoke<void>("open_terminal", { target, path });
 

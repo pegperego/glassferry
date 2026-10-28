@@ -55,6 +55,8 @@ Protected categories (`Category.protected`) require typing the connection name (
 
 Permissions (`attrs.rs`, command `fs_attrs(target, dir, names, change, dryRun)`, dialog `PermissionsDialog` from "Permessi…"): mode grid + octal (special bits kept), optional recursion, owner/group on remote accounts with `chown`/`chgrp`. Remote: `chmod|chown|chgrp [-R] -- <operand> "$@"` through `sh_command` when the probe found the command (`--` before the operand: BSD chmod takes anything after the mode as a file), else SFTP setstat walking the tree without following symlinks (children listed before their folder changes); owner/group need the shell (SFTP v3 knows numeric ids only). Local: mode only, with std. `dryRun` returns exactly the commands `apply` runs (preview); protected connections ask for the name. Check: the `fileops` example (both accounts).
 
+Folder size (`dirsize.rs`, command `fs_dir_size(target, dir, names)`, "Calcola dimensione" in the context menu, shown in the Size column of the folder shown, reset when it changes): remote with `du`: `du -sb` on Linux (apparent bytes), else or as fallback `du -sk` (disk usage, `approx`, shown with `~`); without a shell and locally a walk adding file sizes, symlinks not followed; unreadable folders give `partial` (`+`). Check: the `fileops` example.
+
 UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌥⌘T terminal, ⌘D bookmark, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
 
 ## Editing remote files
@@ -80,7 +82,7 @@ Backend (`src-tauri/src/`):
 - `terminal.rs` — open the system terminal at a folder (see Terminal)
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
-- `transfer.rs`, `fileops.rs`, `attrs.rs`, `edit.rs`, `plan.rs` — see the sections above
+- `transfer.rs`, `fileops.rs`, `attrs.rs`, `dirsize.rs`, `edit.rs`, `plan.rs` — see the sections above
 - `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `remote_copy.rs`, `resume.rs`, `fileops.rs`, `edit.rs`, `connections.rs` (`-F`, ProxyJump between app connections, `ssh -G` errors, keychain round trip: `cargo run --example connections -- "$PWD/../.dev-sshd" segreta <work-dir>`)
 
 Frontend (`src/`):

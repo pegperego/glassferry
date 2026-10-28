@@ -5,6 +5,7 @@ import {
   fsMkdir,
   openTerminal,
   fsAttrs,
+  fsDirSize,
   fsMove,
   fsPlan,
   fsPlanDiscard,
@@ -78,6 +79,7 @@ function paneOps(target: Target, protection: Protection | null, can: { shell: bo
     protection,
     openTerminal: can.shell ? (dir) => openTerminal(target, dir) : null,
     attrs: (dir, names, change, dryRun) => fsAttrs(target, dir, names, change, dryRun),
+    dirSize: (dir, names) => fsDirSize(target, dir, names),
     canChown: can.chown,
   };
 }

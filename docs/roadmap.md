@@ -14,11 +14,9 @@ Sviluppo completato il 2026-10-28 (le voci sono in "Fatto"); manca la prova nell
 
 ## Wave 2 — Uso quotidiano (0.3)
 
-Le funzioni che si usano tutti i giorni. Si parte dalla schermata Impostazioni, che serve alle due voci successive.
+Le funzioni che si usano tutti i giorni.
 
-| Voce | Stato | Proposta il | Note |
-|---|---|---|---|
-| Dimensione di una cartella | proposta | 2026-10-27 | `du -sk` via shell, visita SFTP altrimenti |
+Sviluppo completato il 2026-10-28 (le voci sono in "Fatto"); la prova nell'app vera si fa insieme a quella della wave 1.
 
 ## Wave 3 — Strumenti lato server (0.4)
 

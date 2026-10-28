@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock};
 
 use glassferry_lib::askpass::{AskpassServer, PromptKind};
 use glassferry_lib::attrs::{self, AttrChange};
+use glassferry_lib::dirsize;
 use glassferry_lib::fileops::{remote, Target};
 use glassferry_lib::plan::{PlanMethod, PlanRequest, Planner};
 use glassferry_lib::log::{Logger, Status};
@@ -154,6 +155,19 @@ fn main() {
             "group change needs the shell",
             attrs::remote::commands(&session, &work, &["perm".into()], &chgrp).is_ok()
                 == session.capabilities.commands.iter().any(|c| c == "chgrp"),
+        );
+
+        // Folder size: du on the server (BSD du: disk usage, approximate) or a walk.
+        std::fs::create_dir_all(format!("{work}/sized/sub")).unwrap();
+        std::fs::write(format!("{work}/sized/a.bin"), vec![1u8; 300_000]).unwrap();
+        std::fs::write(format!("{work}/sized/sub/b.bin"), vec![2u8; 200_000]).unwrap();
+        std::os::unix::fs::symlink("/usr", format!("{work}/sized/link")).unwrap();
+        let sizes = dirsize::remote::sizes(&session, &work, &["sized".into()]).await.unwrap();
+        let size = &sizes[0];
+        println!("folder size: {size:?}");
+        check(
+            "folder size",
+            if size.approx { (500_000..700_000).contains(&size.bytes) } else { size.bytes == 500_000 } && !size.partial,
         );
 
         session.close().await;

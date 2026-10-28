@@ -9,7 +9,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { isDirLike, type AttrChange, type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
+import { isDirLike, type AttrChange, type DirSize, type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
 import type { Protection } from "../connections";
 import { clickSelect, emptySelection, moveCursor, selectAll, toggleSort, type SortKey } from "../fileList";
 import { formatPermissions, formatSize, formatTime } from "../format";
@@ -45,6 +45,7 @@ export interface PaneOps {
   attrs: (dir: string, names: string[], change: AttrChange, dryRun: boolean) => Promise<string[]>;
   /** Owner and group can change (remote account with chown/chgrp). */
   canChown: boolean;
+  dirSize: (dir: string, names: string[]) => Promise<DirSize[]>;
 }
 
 /** Bookmarks of the pane's connection (or of local folders). */
@@ -138,6 +139,30 @@ export function FilePane(props: Props) {
   }, [selection.cursor, names, virtualizer]);
 
   useEffect(() => setOpError(null), [path]);
+  /** Folder sizes computed on request, for the folder shown: name → size, or "…" while computing. */
+  const [dirSizes, setDirSizes] = useState<{ path: string | null; sizes: Map<string, DirSize | "…"> }>({
+    path: null,
+    sizes: new Map(),
+  });
+  const sizes = dirSizes.path === path ? dirSizes.sizes : new Map<string, DirSize | "…">();
+  const computeSizes = (folders: string[]) => {
+    if (path === null || folders.length === 0) return;
+    const at = path;
+    const update = (f: (sizes: Map<string, DirSize | "…">) => void) =>
+      setDirSizes((current) => {
+        const next = new Map(current.path === at ? current.sizes : []);
+        f(next);
+        return { path: at, sizes: next };
+      });
+    update((s) => folders.forEach((name) => s.set(name, "…")));
+    ops.dirSize(at, folders).then(
+      (result) => update((s) => result.forEach((size) => s.set(size.name, size))),
+      (e) => {
+        update((s) => folders.forEach((name) => s.delete(name)));
+        setOpError(String(e));
+      },
+    );
+  };
 
   const selectionOrCursor = () =>
     selection.selected.size > 0
@@ -331,6 +356,7 @@ export function FilePane(props: Props) {
 
   const menuItems = (entry: FileEntry | null): MenuItem[] => {
     const chosen = entry ? (selection.selected.has(entry.name) ? selectionOrCursor() : [entry.name]) : [];
+    const chosenDirs = chosen.filter((name) => visible.some((v) => v.name === name && v.kind === "dir"));
     const items: MenuItem[] = [];
     if (entry && isDirLike(entry) && chosen.length === 1) items.push({ label: "Apri", shortcut: "↩", onSelect: () => open(entry) });
     if (entry && isDirLike(entry) && chosen.length === 1 && ops.openTerminal && path)
@@ -346,6 +372,9 @@ export function FilePane(props: Props) {
         { label: "Rinomina", shortcut: "F2", disabled: chosen.length !== 1, onSelect: () => startRename(entry.name) },
         { label: "Sposta in…", onSelect: () => setDialog({ kind: "move", names: chosen }) },
         { label: "Permessi…", onSelect: () => setDialog({ kind: "permissions", names: chosen }) },
+        ...(chosenDirs.length > 0
+          ? [{ label: chosenDirs.length === 1 ? "Calcola dimensione" : `Calcola dimensione (${chosenDirs.length} cartelle)`, onSelect: () => computeSizes(chosenDirs) }]
+          : []),
         { label: "Copia percorso", onSelect: () => path && void navigator.clipboard.writeText(joinPath(path, entry.name)) },
         { separator: true },
         {
@@ -502,7 +531,7 @@ export function FilePane(props: Props) {
                       entry.name
                     )}
                   </span>
-                  <span className="num">{isDirLike(entry) ? "" : formatSize(entry.size)}</span>
+                  {isDirLike(entry) ? <FolderSize size={sizes.get(entry.name)} /> : <span className="num">{formatSize(entry.size)}</span>}
                   <span>{formatTime(entry.modified)}</span>
                   <span className="col-perm mono">{formatPermissions(entry.permissions)}</span>
                 </div>
@@ -666,4 +695,23 @@ function describe(names: string[]): string {
 function icon(entry: FileEntry): string {
   if (entry.kind === "symlink") return "🔗";
   return isDirLike(entry) ? "📁" : "📄";
+}
+
+/** Size of a folder computed on request: `~` for disk usage (du -k), `+` when some content was unreadable. */
+function FolderSize({ size }: { size: DirSize | "…" | undefined }) {
+  if (size === undefined) return <span className="num" />;
+  if (size === "…") return <span className="num muted">…</span>;
+  const title = [
+    size.approx ? "spazio occupato su disco (du)" : "somma delle dimensioni dei file",
+    size.partial ? "alcune cartelle non erano leggibili" : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+  return (
+    <span className="num folder-size" title={title}>
+      {size.approx ? "~" : ""}
+      {formatSize(size.bytes)}
+      {size.partial ? "+" : ""}
+    </span>
+  );
 }

@@ -46,7 +46,7 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 |---|---|---|
 | Eliminazione ricorsiva | Visita dell'albero, una richiesta per file | `rm -rf` |
 | Spostamento tra filesystem diversi | `rename` fallisce | `mv` |
-| Controllo conflitti nella modifica | Dimensione e mtime (1 s) | Anche `sha256sum` |
+| Controllo conflitti nella modifica | Dimensione e mtime, poi hash del file riletto via SFTP | Dimensione e mtime, poi `sha256sum` |
 
 **Perché ibrido e non solo shell.**
 - Gli account solo SFTP (`ForceCommand internal-sftp`, chroot, hosting, NAS) non permettono comandi.
@@ -62,7 +62,7 @@ Questo documento raccoglie le scelte di fondo del progetto e il loro perché. I 
 | `rename` fallisce se la destinazione esiste | Estensione `posix-rename@openssh.com` quando il server la supporta; le operazioni sui file non sovrascrivono mai |
 | Nessuna copia lato server | Fuori MVP (in roadmap: `cp -a` o `copy-data`) |
 | `rename` tra filesystem diversi fallisce | Fallback su `mv` se c'è la shell |
-| mtime con risoluzione di 1 secondo | Nei conflitti di modifica si aggiunge `sha256sum` quando disponibile |
+| mtime con risoluzione di 1 secondo | Nei conflitti di modifica, se dimensione e mtime coincidono, si confronta l'hash del contenuto: `sha256sum` sul server, oppure rileggendo il file via SFTP sugli account senza shell (2026-10-28; prima una modifica nello stesso secondo e della stessa dimensione sfuggiva) |
 | Una richiesta alla volta è lenta con latenza | 16 richieste da 256 KiB in volo per file, 3 file in parallelo |
 
 ## 6. Trasferimenti

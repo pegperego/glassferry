@@ -4,8 +4,10 @@
 //! directory (not the file: many editors save by writing a new file and
 //! renaming it) is watched; after a short debounce, a content change is
 //! uploaded. Before each upload the remote file is compared with the version
-//! that was opened (size, mtime and, when the server has `sha256sum`, the
-//! content hash): if someone else changed it, the user decides.
+//! that was opened: size and mtime, then, when those match, the content hash
+//! (`sha256sum` on the server, or the file read over SFTP on accounts without
+//! a shell: SFTP v3 mtimes have 1 s resolution). If someone else changed it,
+//! the user decides.
 //!
 //! Uploads write `<name>.gf-part` and rename it over the file (posix-rename,
 //! one step), so a dropped connection never leaves it partial; the mode is
@@ -462,13 +464,21 @@ impl EditManager {
 
         let remote_path = edit.info.lock().unwrap().remote_path.clone();
         let opened = edit.remote.lock().unwrap().clone();
-        let current = match remote_state(&session, &remote_path, opened.sha256.is_some()).await {
+        let mut current = match remote_state(&session, &remote_path).await {
             Ok(state) => state,
             Err(e) => return self.set_state(edit, EditState::Error, Some(e.to_string())),
         };
-        let changed = current.size != opened.size
-            || current.modified != opened.modified
-            || (opened.sha256.is_some() && current.sha256 != opened.sha256);
+        let mut changed = current.size != opened.size || current.modified != opened.modified;
+        // Same size and second: only the content tells.
+        if let (false, false, Some(opened_hash)) = (changed, force, &opened.sha256) {
+            match remote_hash(&session, &remote_path).await {
+                Ok(hash) => {
+                    changed = hash != *opened_hash;
+                    current.sha256 = Some(hash);
+                }
+                Err(e) => return self.set_state(edit, EditState::Error, Some(e.to_string())),
+            }
+        }
         if changed && !force {
             match self.ask_conflict(edit, &opened, &current).await {
                 ConflictChoice::Overwrite => {}
@@ -491,9 +501,7 @@ impl EditManager {
         self.set_state(edit, EditState::Uploading, None);
         match upload(&session, &remote_path, &content).await {
             Ok(mut state) => {
-                if opened.sha256.is_some() {
-                    state.sha256 = Some(hash.clone());
-                }
+                state.sha256 = Some(hash.clone());
                 *edit.remote.lock().unwrap() = state;
                 *edit.synced_hash.lock().unwrap() = hash;
                 {
@@ -743,14 +751,26 @@ impl EditManager {
 
 // ---- remote I/O ----------------------------------------------------------------
 
-async fn remote_state(session: &Session, path: &str, with_hash: bool) -> Result<RemoteState> {
+/// Size and mtime; the hash is left to `remote_hash`, only needed when they match.
+async fn remote_state(session: &Session, path: &str) -> Result<RemoteState> {
     let meta = session.sftp.fs().metadata(path).await?;
-    let sha256 = if with_hash { remote_sha256(session, path).await } else { None };
     Ok(RemoteState {
         size: meta.len().unwrap_or(0),
         modified: meta.modified().map(|t| t.as_duration().as_secs()),
-        sha256,
+        sha256: None,
     })
+}
+
+/// Content hash of the remote file: `sha256sum` on the server when the probe
+/// found it, otherwise the file is read over SFTP (at most `MAX_EDIT_BYTES`).
+async fn remote_hash(session: &Session, path: &str) -> Result<String> {
+    if let Some(hash) = remote_sha256(session, path).await {
+        return Ok(hash);
+    }
+    let mut op = session.launcher.log(Channel::Sftp, "edit-check", path);
+    op.equivalent(session.launcher.sftp_equivalent("get", &[path]));
+    let result = async { Ok::<_, AppError>(sha256_hex(&session.sftp.fs().read(path).await?)) }.await;
+    op.result(result, |_| Some("confronto del contenuto letto via SFTP (sha256sum non disponibile)".into()))
 }
 
 async fn remote_sha256(session: &Session, path: &str) -> Option<String> {
@@ -782,10 +802,13 @@ async fn download(session: &Session, path: &str) -> Result<(Vec<u8>, RemoteState
             )));
         }
         let content = session.sftp.fs().read(path).await?.to_vec();
-        let sha256 = remote_sha256(session, path).await;
-        // Hash from the server and of what we read must agree; otherwise the
-        // file changed while we were reading: just keep the size/mtime check.
-        let sha256 = sha256.filter(|h| *h == sha256_hex(&content));
+        // When the server can hash, it must agree with what we read; otherwise
+        // the file changed while we were reading: keep the size/mtime check.
+        let read = sha256_hex(&content);
+        let sha256 = match remote_sha256(session, path).await {
+            Some(hash) => (hash == read).then_some(read),
+            None => Some(read),
+        };
         Ok((
             content,
             RemoteState {
@@ -809,7 +832,7 @@ async fn upload(session: &Session, path: &str, content: &[u8]) -> Result<RemoteS
             file.write_all(content).await?;
             file.close().await?;
         }
-        Ok((remote_state(session, path, false).await?, in_place))
+        Ok((remote_state(session, path).await?, in_place))
     }
     .await;
     let size = crate::transfer::format_bytes(content.len() as u64);

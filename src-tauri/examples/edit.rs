@@ -156,6 +156,23 @@ fn main() {
         settle().await;
         check("resolve later uploads", std::fs::read_to_string(&remote).unwrap().contains("listen 4;") && state() == EditState::Synced);
 
+        // Same size, same mtime (SFTP v3 has 1 s resolution): only the content
+        // hash sees the change, also without sha256sum (gf-sftponly).
+        let mtime = std::fs::metadata(&remote).unwrap().modified().unwrap();
+        let theirs = std::fs::read_to_string(&remote).unwrap().replace("listen 4;", "listen 5;");
+        std::fs::write(&remote, &theirs).unwrap();
+        std::fs::File::options().write(true).open(&remote).unwrap().set_modified(mtime).unwrap();
+        *next_choice.lock().unwrap() = ConflictChoice::Keep;
+        std::fs::write(&local, "server { listen 4; } \n").unwrap();
+        settle().await;
+        check(
+            "same size and mtime: the content change is still detected",
+            *conflicts.lock().unwrap() == 4 && std::fs::read_to_string(&remote).unwrap() == theirs,
+        );
+        manager.resolve(info.id, ConflictChoice::Overwrite).unwrap();
+        settle().await;
+        check("overwrite after a same-second change", std::fs::read_to_string(&remote).unwrap() == "server { listen 4; } \n");
+
         manager.close(info.id);
         check("close removes local copy", !local.exists() && manager.list().is_empty());
 

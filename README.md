@@ -60,6 +60,8 @@ Status: MVP complete, not yet released. The interface is in Italian for now.
 ## Development
 
 ```sh
+git clone https://github.com/pegperego/glassferry.git
+cd glassferry
 pnpm install
 pnpm tauri dev
 ```

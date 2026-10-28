@@ -9,8 +9,8 @@ Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in an
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
 | Prova con configurazioni ssh complesse | proposta | 2026-10-27 | ProxyJump, 1Password (`IdentityAgent`), 2FA/TOTP, `Match`: non presenti nel config usato per la prova sul campo |
-| Build firmata e notarizzata per macOS (arm64 e x64) | da fare | 2026-10-27 | Distribuzione fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` |
-| Pacchetti Linux (AppImage / deb) | proposta | 2026-10-27 | Linux è una piattaforma supportata, ma finora provato solo su macOS |
+| Build notarizzata per macOS | da fare | 2026-10-27 | Distribuzione fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh`. Manca l'account Apple Developer (99 $/anno): intanto le build sono firmate ad-hoc; poi basta aggiungere i secret a `release.yml` |
+| Pacchetti Linux (AppImage / deb / rpm) | in corso | 2026-10-27 | Prodotti da `release.yml`; da provare su una macchina Linux vera, finora l'app è stata usata solo su macOS |
 
 ## Funzioni
 
@@ -69,4 +69,5 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Nuovo nome Glassferry e nuova icona | `8884374` |
 | Fasi 2–4 provate nell'app (2026-10-28) | — |
 | Pubblicazione su [GitHub](https://github.com/pegperego/glassferry) (2026-10-28) | — |
+| CI (test e clippy su macOS e Linux) e workflow di release con build macOS firmate ad-hoc | |
 | Prova sul campo con i server reali: esito positivo (2026-10-27) | — |

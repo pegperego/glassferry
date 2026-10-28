@@ -137,7 +137,11 @@ Lo spostamento tra server diversi non è previsto, perché unirebbe due operazio
 
 ## 14. Distribuzione
 
-Fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` e di leggere `~/.ssh`. Build firmata e notarizzata, arm64 e x64 (in roadmap).
+Fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` e di leggere `~/.ssh`.
+
+Le build escono dalle GitHub Release, prodotte da `.github/workflows/release.yml` (`tauri-action`) a ogni tag `vX.Y.Z`: `.dmg` per arm64 e x64, AppImage, `.deb` e `.rpm` costruiti su Ubuntu 22.04 per restare compatibili con glibc più vecchie. La release nasce in bozza e si pubblica a mano dopo un controllo.
+
+Dal 2026-10-28 la build macOS è firmata ad-hoc (`bundle.macOS.signingIdentity: "-"`) ma non notarizzata: manca un account Apple Developer. Gatekeeper la blocca al primo avvio e l'utente la sblocca da Privacy e sicurezza o con `xattr`; per un pubblico che usa ssh è accettabile. Quando ci sarà l'account basterà aggiungere certificato e credenziali di notarizzazione come secret della workflow. Per lo stesso motivo niente cask nel tap ufficiale di Homebrew, che non accetta app non notarizzate.
 
 Un'app aperta dal Finder non legge `.zshrc`: chi esporta `SSH_AUTH_SOCK` dalla shell invece di usare `IdentityAgent` non avrà quell'agent. Il `SSH_AUTH_SOCK` di launchd invece è disponibile.
 

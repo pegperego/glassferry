@@ -2,7 +2,7 @@
 
 A free, open source SFTP client for macOS and Linux that uses your system OpenSSH. It honours your `~/.ssh/config` exactly as the terminal does: `Include`, `Match`, `ProxyJump`, `IdentityAgent` (1Password and other agents), `RemoteCommand`. Nothing is installed on the server: only the standard SFTP subsystem is used, plus ordinary shell commands when the account allows them.
 
-Status: MVP complete, not yet released. The interface is in Italian for now.
+Status: MVP complete. The interface is in Italian for now.
 
 ## Features
 
@@ -51,6 +51,16 @@ Status: MVP complete, not yet released. The interface is in Italian for now.
 | Activity log | `~/Library/Logs/Glassferry/` (Linux: `$XDG_STATE_HOME/glassferry/logs`) |
 | Local copies of files being edited | `~/Library/Caches/glassferry/edit/`. Removed when closed, and on exit once synced |
 | Control sockets | `/tmp/gf-<uid>` (mode 0700) |
+
+## Install
+
+Download the latest build from [Releases](https://github.com/pegperego/glassferry/releases): `.dmg` for macOS (Apple silicon `aarch64`, Intel `x64`), AppImage, `.deb` or `.rpm` for Linux.
+
+The macOS builds are not notarized yet, so macOS refuses to open the app the first time. Either go to System Settings → Privacy & Security and click "Open Anyway", or run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Glassferry.app
+```
 
 ## Requirements
 

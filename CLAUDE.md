@@ -84,6 +84,7 @@ Frontend (`src/`):
 
 Other:
 - `src-tauri/icons/icon.svg` — icon source; regenerate every size with `pnpm tauri icon <1024 px png>` (drop the android/ios outputs)
+- `.github/workflows/` — `ci.yml` (build, vitest, cargo test, clippy `-D warnings` on macOS and Ubuntu 22.04), `release.yml` (tag `vX.Y.Z` = version in `tauri.conf.json` → draft release with `.dmg` arm64/x64, AppImage, `.deb`, `.rpm`; macOS signed ad-hoc, not notarized; run by hand = build only, bundles as workflow artifacts)
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `gf-local`, `gf-sftponly`, `gf-rc`, `gf-slow`); `scripts/delay-relay.py` adds latency for `gf-slow`
 - `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (all four phases implemented)
 

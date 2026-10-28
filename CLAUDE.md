@@ -53,7 +53,7 @@ Protected categories (`Category.protected`) require typing the connection name (
 
 `fileops.rs`, commands `fs_mkdir`/`fs_rename`/`fs_move`/`fs_delete` with a `Target` (`{kind:"local"}` or `{kind:"remote", sessionId}`). Names are validated (`validate_name`: no `/`, `.`, `..`, empty). Rename and move never overwrite (destination checked first). Local delete = Trash (`trash` crate, NSFileManager method: no Finder permission prompt). Remote delete is permanent: `rm -rf -- "$@"` via `sh_command` when the probe found `rm`, recursive SFTP walk otherwise (symlinks removed, never followed); `/` and the home dir are refused. Remote move falls back to `mv` when SFTP rename fails (e.g. across filesystems). Check against the fixture: `cargo run --example fileops -- "$PWD/../.dev-sshd/ssh" gf-local segreta <work-dir>` (and `gf-sftponly`).
 
-UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
+UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌥⌘T terminal, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
 
 ## Editing remote files
 
@@ -61,12 +61,17 @@ UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌘⌫/Delete delete 
 
 UI: double click / Enter on a remote file = edit, on a local file = open with the default app; the bottom panel's "File aperti" tab lists open files.
 
+## Terminal
+
+`terminal.rs`, command `open_terminal(target, path)`: ⌥⌘T in a pane (current folder) or "Apri nel terminale" in the context menu (a folder, or the current one). Local: the login shell starts in the folder. Remote: a new, independent `ssh [-F file] -t -o RemoteCommand=none -- alias '<cd + exec $SHELL -l>'` (path as a positional parameter of `sh -c`), authenticated in the terminal, not through the app's ControlMaster (closing the pane would close it); not offered on SFTP-only accounts (`PaneOps.openTerminal` null). The terminal runs a one-shot script in the runtime dir that deletes itself: `open -a <app>` on macOS (Terminal default, iTerm; no automation permission), `$TERMINAL`/`x-terminal-emulator -e` on Linux, or a custom command from the settings (`{script}` placeholder, run with `sh -c`).
+
 ## Layout
 
 Backend (`src-tauri/src/`):
 - `lib.rs` — Tauri state, commands, exit cleanup
 - `connections.rs` (store, categories, generated ssh_config, `ssh -G`, keychain), `ssh_config.rs` (host aliases for the import), `session.rs` (master, channels, probe, `sh_command`), `askpass.rs`, `runtime_dir.rs`, `error.rs`
 - `settings.rs` — settings the backend needs (`settings.json` in the config dir: ssh binary, read at each connect via `AppState::ssh_bin()`; `ssh_check` runs `ssh -V`, OpenSSH ≥ 8.4); commands `settings_load`/`settings_save`
+- `terminal.rs` — open the system terminal at a folder (see Terminal)
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
 - `transfer.rs`, `fileops.rs`, `edit.rs`, `plan.rs` — see the sections above

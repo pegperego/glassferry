@@ -89,6 +89,15 @@ export const listHosts = () => invoke<HostEntry[]>("list_hosts");
 export interface Settings {
   /** Absolute path; null: /usr/bin/ssh. */
   sshBin: string | null;
+  terminal: TerminalSettings;
+}
+
+/** How "Apri nel terminale" opens the terminal. */
+export interface TerminalSettings {
+  /** macOS app that runs the script (`open -a`); null: Terminal. */
+  app: string | null;
+  /** Command run with `sh -c`, `{script}` replaced by the script path; overrides `app`. */
+  command: string | null;
 }
 
 export interface SshCheck {
@@ -261,6 +270,9 @@ export type Target = { kind: "local" } | { kind: "remote"; sessionId: number };
 export type DeleteMethod = "trash" | "shell" | "sftp";
 
 export const fsMkdir = (target: Target, dir: string, name: string) => invoke<void>("fs_mkdir", { target, dir, name });
+
+/** Opens the system terminal in `path` (remote: a new ssh connection that changes to it). */
+export const openTerminal = (target: Target, path: string) => invoke<void>("open_terminal", { target, path });
 
 export const fsRename = (target: Target, dir: string, from: string, to: string) =>
   invoke<void>("fs_rename", { target, dir, from, to });

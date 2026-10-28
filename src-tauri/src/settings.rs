@@ -18,6 +18,8 @@ const MIN_SSH_VERSION: (u32, u32) = (8, 4);
 pub struct Settings {
     /// Absolute path of the ssh binary; `None`: `/usr/bin/ssh`.
     pub ssh_bin: Option<String>,
+    /// How "Apri nel terminale" opens the terminal.
+    pub terminal: crate::terminal::TerminalSettings,
 }
 
 impl Settings {
@@ -28,6 +30,7 @@ impl Settings {
     /// Empty strings mean "default"; paths must be absolute.
     pub fn normalized(mut self) -> Result<Self> {
         self.ssh_bin = self.ssh_bin.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+        self.terminal = self.terminal.normalized();
         if let Some(path) = &self.ssh_bin
             && !Path::new(path).is_absolute()
         {
@@ -133,11 +136,12 @@ mod tests {
 
     #[test]
     fn normalizes_ssh_path() {
-        let s = Settings { ssh_bin: Some("  ".into()) }.normalized().unwrap();
+        let with = |path: &str| Settings { ssh_bin: Some(path.into()), ..Default::default() };
+        let s = with("  ").normalized().unwrap();
         assert_eq!(s.ssh_bin, None);
         assert_eq!(s.ssh_bin(), PathBuf::from(DEFAULT_SSH_BIN));
-        assert!(Settings { ssh_bin: Some("ssh".into()) }.normalized().is_err());
-        let s = Settings { ssh_bin: Some("/opt/homebrew/bin/ssh".into()) }.normalized().unwrap();
+        assert!(with("ssh").normalized().is_err());
+        let s = with("/opt/homebrew/bin/ssh").normalized().unwrap();
         assert_eq!(s.ssh_bin(), PathBuf::from("/opt/homebrew/bin/ssh"));
     }
 }

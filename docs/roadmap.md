@@ -18,7 +18,6 @@ Le funzioni che si usano tutti i giorni. Si parte dalla schermata Impostazioni, 
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
-| Aprire il terminale di sistema nella cartella del pannello (tasto rapido e menu contestuale) | da fare | 2026-10-28 | Per passare alla riga di comando senza riposizionarsi a mano. Pannello locale: il terminale si apre nella cartella corrente (`open -a Terminal <dir>`, `x-terminal-emulator`/`$TERMINAL` su Linux). Pannello remoto: nuova connessione `ssh -t` con lo stesso alias e `-F` della connessione, che fa `cd` nel percorso del pannello e avvia la shell di login; da valutare il riuso del ControlMaster (`-S <sock>`) per non richiedere di nuovo password o OTP. Non disponibile sugli account solo SFTP. Tasto ⌥⌘T (deciso 2026-10-28). App terminale configurabile nelle impostazioni (Terminal, iTerm2, Ghostty…; su Linux anche un comando libero), default Terminal su macOS |
 | Segnalibri per host e cartella | proposta | 2026-10-27 | |
 | chmod / chown da interfaccia | proposta | 2026-10-27 | Anche ricorsivo con `chmod -R` quando la shell è disponibile |
 | Dimensione di una cartella | proposta | 2026-10-27 | `du -sk` via shell, visita SFTP altrimenti |

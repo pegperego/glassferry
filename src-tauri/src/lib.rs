@@ -10,6 +10,7 @@ pub mod plan;
 pub mod runtime_dir;
 pub mod session;
 pub mod settings;
+pub mod terminal;
 pub mod ssh_config;
 pub mod transfer;
 
@@ -118,6 +119,29 @@ fn settings_save(state: State<'_, AppState>, settings: settings::Settings) -> Re
     op.result(state.settings_store.save(&settings), |_| Some(format!("ssh: {}", settings.ssh_bin().display())))?;
     *state.settings.lock().unwrap() = settings.clone();
     Ok(settings)
+}
+
+/// Opens the system terminal in `path`: a local shell, or a new ssh
+/// connection to the pane's host that changes to `path`.
+#[tauri::command]
+async fn open_terminal(state: State<'_, AppState>, target: Target, path: String) -> Result<()> {
+    let settings = state.settings.lock().unwrap().terminal.clone();
+    let (host, script, equivalent) = match target {
+        Target::Local => (None, terminal::local_script(&path), format!("cd {}", log::shell_line([&path]))),
+        Target::Remote { session_id } => {
+            let session = state.session(session_id)?;
+            if !session.capabilities.shell {
+                return Err(AppError::Other("account solo SFTP: il server non concede una shell".into()));
+            }
+            let launcher = &session.launcher;
+            let line = terminal::ssh_line(&launcher.ssh_bin, launcher.config_file.as_deref(), &launcher.alias, &path);
+            (Some(launcher.label.clone()), terminal::remote_script(&line), line)
+        }
+    };
+    let mut op = state.logger.start(host.as_deref(), log::Channel::Local, "terminal", &path);
+    op.equivalent(equivalent);
+    op.result(terminal::open(&settings, &state.runtime_dir, &script).await, |how| Some(how.clone()))?;
+    Ok(())
 }
 
 /// `ssh -V` of `path` (the configured binary when `None`).
@@ -601,6 +625,7 @@ pub fn run() {
             settings_load,
             settings_save,
             ssh_check,
+            open_terminal,
             connections_load,
             connections_save,
             connection_forget_password,

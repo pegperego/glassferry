@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import {
   askpassRespond,
   fsMkdir,
+  openTerminal,
   fsMove,
   fsPlan,
   fsPlanDiscard,
@@ -54,7 +55,8 @@ type Modal =
   | { kind: "disconnect"; slot: number; files: EditInfo[]; then: () => void }
   | null;
 
-function paneOps(target: Target, protection: Protection | null): PaneOps {
+/** `shell`: the account can run commands (needed by the remote terminal). */
+function paneOps(target: Target, protection: Protection | null, shell: boolean): PaneOps {
   return {
     mkdir: (dir, name) => fsMkdir(target, dir, name),
     rename: (dir, from, to) => fsRename(target, dir, from, to),
@@ -64,10 +66,11 @@ function paneOps(target: Target, protection: Protection | null): PaneOps {
     discard: (id) => void fsPlanDiscard(id).catch(() => {}),
     permanentDelete: target.kind === "remote",
     protection,
+    openTerminal: shell ? (dir) => openTerminal(target, dir) : null,
   };
 }
 
-const localOps = paneOps({ kind: "local" }, null);
+const localOps = paneOps({ kind: "local" }, null, true);
 
 /** `dir` is `path` or inside it. */
 const within = (path: string | null, dir: string) =>
@@ -346,7 +349,11 @@ export default function App() {
         <RemotePane
           key={key}
           side={remoteSide(slot)}
-          ops={paneOps({ kind: "remote", sessionId: s.result.sessionId }, protectionOf(store, s.connection))}
+          ops={paneOps(
+            { kind: "remote", sessionId: s.result.sessionId },
+            protectionOf(store, s.connection),
+            s.result.capabilities.shell,
+          )}
           connection={s.connection}
           name={paneName(slot)}
           category={store ? categoryOf(store, s.connection) : undefined}

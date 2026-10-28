@@ -38,6 +38,8 @@ export interface PaneOps {
   permanentDelete: boolean;
   /** Remote connection of the pane; null for the local pane. */
   protection: Protection | null;
+  /** Opens the system terminal in a folder (⌥⌘T); null on SFTP-only accounts. */
+  openTerminal: ((dir: string) => Promise<void>) | null;
 }
 
 interface Props {
@@ -211,6 +213,12 @@ export function FilePane(props: Props) {
     });
   };
 
+  const terminalAt = (dir: string | null) => {
+    if (!dir || !ops.openTerminal) return;
+    setOpError(null);
+    ops.openTerminal(dir).catch((e) => setOpError(String(e)));
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (renaming !== null) return;
     const move = (delta: number) => pane.setSelection(moveCursor(selection, names, delta, e.shiftKey));
@@ -234,6 +242,8 @@ export function FilePane(props: Props) {
     else if (e.key === "." && e.metaKey && e.shiftKey) pane.setShowHidden(!pane.showHidden);
     else if (e.key === "F2") startRename(selection.cursor);
     else if (e.key === "F7" || (e.key.toLowerCase() === "n" && e.metaKey && e.shiftKey)) setDialog({ kind: "mkdir" });
+    // ⌥ changes e.key on macOS (⌥T = †): match the physical key.
+    else if (e.code === "KeyT" && e.metaKey && e.altKey) terminalAt(path);
     else if (e.key === "F5" && e.shiftKey && transferTargets.length > 0) {
       const chosen = selectionOrCursor();
       const rect = listRef.current?.getBoundingClientRect();
@@ -301,6 +311,8 @@ export function FilePane(props: Props) {
     const chosen = entry ? (selection.selected.has(entry.name) ? selectionOrCursor() : [entry.name]) : [];
     const items: MenuItem[] = [];
     if (entry && isDirLike(entry) && chosen.length === 1) items.push({ label: "Apri", shortcut: "↩", onSelect: () => open(entry) });
+    if (entry && isDirLike(entry) && chosen.length === 1 && ops.openTerminal && path)
+      items.push({ label: "Apri nel terminale", onSelect: () => terminalAt(joinPath(path, entry.name)) });
     if (entry && !isDirLike(entry) && openFile && chosen.length === 1)
       items.push({ label: openFile.label, shortcut: "↩", onSelect: () => open(entry) });
     if (entry && transfer) items.push({ label: transfer.label, shortcut: "F5", onSelect: () => transfer.run(chosen) });
@@ -326,6 +338,8 @@ export function FilePane(props: Props) {
       { label: "Nuova cartella…", shortcut: "⇧⌘N", onSelect: () => setDialog({ kind: "mkdir" }) },
       { label: "Aggiorna", onSelect: () => void pane.refresh() },
     );
+    if (!entry && path && ops.openTerminal)
+      items.push({ label: "Apri nel terminale", shortcut: "⌥⌘T", onSelect: () => terminalAt(path) });
     if (!entry && path) items.push({ label: "Copia percorso cartella", onSelect: () => void navigator.clipboard.writeText(path) });
     return items;
   };

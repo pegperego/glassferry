@@ -153,3 +153,11 @@ Un'app aperta dal Finder non legge `.zshrc`: chi esporta `SSH_AUTH_SOCK` dalla s
 Il nome unisce *ferry* (traghetto: i file vanno e vengono tra le sponde) e *glass*: l'app è trasparente, mostra i comandi esatti prima e dopo ogni operazione. L'icona (`src-tauri/icons/icon.svg`) è uno scafo di vetro con dentro un prompt `>_`; le due finestre della cabina sono i due pannelli remoti. Le dimensioni si rigenerano con `pnpm tauri icon <png 1024>`.
 
 Prima del 2026-10-28 l'app si chiamava "SSH File Manager" (cartelle e servizio del Portachiavi `sshfilemanager`). Era un'alpha senza utenti, quindi nessuna migrazione: nome, percorsi, identifier (`dev.sshfilemanager.app` → `app.glassferry`) e prefisso interno (`sfm` → `gf`: `Host gf-<id>`, `.gf-part`, `GF_*`, `/tmp/gf-<uid>`, chiavi localStorage `gf.*`) sono cambiati e basta.
+
+## 16. Terminale di sistema nella cartella del pannello
+
+(2026-10-28) ⌥⌘T, o "Apri nel terminale" dal menu, apre il terminale dell'utente nella cartella del pannello.
+
+- **Remoto: una connessione nuova, non il ControlMaster dell'app.** Il terminale vivrebbe dentro il master: chiudendo il pannello si chiuderebbe anche lui. La connessione nuova usa lo stesso ssh, lo stesso `-F` e lo stesso alias, quindi passa da ProxyJump, agent e `Match` come quella del pannello; password e OTP si inseriscono nel terminale, che è il posto naturale. Opzioni aggiunte: `-t` (con un comando ssh non assegna un terminale) e `-o RemoteCommand=none` (con un `RemoteCommand` nel config ssh rifiuterebbe il comando), le stesse giustificazioni dei canali.
+- **Il comando remoto** passa dalla shell di login, qualunque sia: avvia un `sh -c` che fa `cd` nella cartella, ricevuta come parametro posizionale e mai come codice, e poi `exec` della shell di login. Sugli account solo SFTP non c'è shell: la voce non compare.
+- **Avvio del terminale con uno script usa e getta** nella cartella privata di runtime, che si cancella da solo. Su macOS `open -a <app> script.command`, che Terminal e iTerm eseguono senza chiedere il permesso di automazione (AppleScript lo richiederebbe); su Linux `$TERMINAL` o `x-terminal-emulator -e`. Per gli altri terminali c'è un comando personalizzato nelle Impostazioni con `{script}`.

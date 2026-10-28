@@ -86,3 +86,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Schermata Impostazioni (⌘,) e binario `ssh` configurabile | `01f4253` |
 | Terminale di sistema nella cartella del pannello (⌥⌘T), locale o con una nuova connessione ssh, app configurabile | `2dd80a4` |
 | Segnalibri di cartelle per connessione e locali (★, ⌘D, palette ⌘K) | `e580830` |
+| chmod / chown / chgrp da interfaccia (anche ricorsivi), con anteprima dei comandi | `fc841dd` |

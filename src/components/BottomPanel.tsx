@@ -29,6 +29,8 @@ interface Props {
   edits: Edits;
   /** Category color of a host (connection name), for transfers and open files. */
   hostColor: (host: string) => string | undefined;
+  /** Opens a connection again (open files left detached by a disconnect). */
+  onReconnect: (connectionId: string) => void;
   tab: BottomTab;
   onTab: (tab: BottomTab) => void;
   open: boolean;
@@ -38,7 +40,7 @@ interface Props {
 }
 
 /** Bottom panel with the activity log and the transfer queue. */
-export function BottomPanel({ log, transfers, edits, hostColor, tab, onTab, open, onToggle, height, onResize }: Props) {
+export function BottomPanel({ log, transfers, edits, hostColor, onReconnect, tab, onTab, open, onToggle, height, onResize }: Props) {
   const [filter, setFilter] = useState<LogFilter>(emptyFilter);
   /** Host filter of the Trasferimenti and File aperti tabs. */
   const [itemHost, setItemHost] = useState<string | null>(null);
@@ -191,7 +193,7 @@ export function BottomPanel({ log, transfers, edits, hostColor, tab, onTab, open
         )}
       </header>
       {open && tab === "transfers" && <TransfersView transfers={transfers} host={itemHost} hostColor={hostColor} />}
-      {open && tab === "edits" && <EditsView edits={edits} host={itemHost} hostColor={hostColor} />}
+      {open && tab === "edits" && <EditsView edits={edits} host={itemHost} hostColor={hostColor} onReconnect={onReconnect} />}
       {open && tab === "log" && (
         <div className={selected ? "log-body with-details" : "log-body"}>
           <LogList entries={visible} selectedId={selectedId} onSelect={setSelectedId} />

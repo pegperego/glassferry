@@ -1493,6 +1493,10 @@ button.link {
   background: var(--danger);
 }
 
+.edit-dot.detached {
+  background: #d99a00;
+}
+
 button:disabled {
   opacity: 0.45;
 }

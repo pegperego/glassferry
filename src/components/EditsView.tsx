@@ -10,6 +10,7 @@ const STATE_LABEL: Record<EditInfo["state"], string> = {
   conflict: "Conflitto: modifiche locali non caricate",
   error: "Errore",
   unconfirmed: "Modifiche non caricate: caricamento non confermato",
+  detached: "Non connesso: modifiche non caricate",
 };
 
 interface Props {
@@ -17,9 +18,10 @@ interface Props {
   /** Show only this host's files. */
   host: string | null;
   hostColor: (host: string) => string | undefined;
+  onReconnect: (connectionId: string) => void;
 }
 
-export function EditsView({ edits, host, hostColor }: Props) {
+export function EditsView({ edits, host, hostColor, onReconnect }: Props) {
   const [closing, setClosing] = useState<EditInfo | null>(null);
   const shown = host ? edits.edits.filter((e) => e.host === host) : edits.edits;
   if (edits.edits.length === 0) {
@@ -53,7 +55,9 @@ export function EditsView({ edits, host, hostColor }: Props) {
                   ? "nessun salvataggio caricato"
                   : `${edit.uploads} salvataggi caricati, l'ultimo alle ${formatLogTime(edit.lastSyncAt).slice(0, 8)}`}
               </span>
-              {edit.error && <span className={edit.state === "synced" ? "" : "error-text"}>{edit.error}</span>}
+              {edit.error && (
+                <span className={edit.state === "synced" || edit.state === "detached" ? "" : "error-text"}>{edit.error}</span>
+              )}
             </div>
           </div>
           {edit.state === "conflict" && (
@@ -63,6 +67,11 @@ export function EditsView({ edits, host, hostColor }: Props) {
             </>
           )}
           {edit.state === "unconfirmed" && <button onClick={() => edits.upload(edit.id)}>Carica sul server</button>}
+          {edit.state === "detached" && (
+            <button title="Riapri la connessione: le modifiche vengono caricate" onClick={() => onReconnect(edit.connectionId)}>
+              Riconnetti
+            </button>
+          )}
           <button onClick={() => edits.reopen(edit.id)}>Apri</button>
           <button title="Mostra la copia locale nel Finder" onClick={() => edits.reveal(edit.id)}>
             Mostra

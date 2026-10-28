@@ -12,6 +12,12 @@
 //!
 //! On protected connections (`confirm_saves`), the first upload of each open
 //! file waits for an explicit confirmation (`edit-confirm` event).
+//!
+//! Local changes are never dropped: on disconnect a file with changes not on
+//! the server is *detached* (copy kept, no session) and reattached when the
+//! same connection connects again, which uploads it with the usual conflict
+//! check. Open files are recorded in `<root>/edits.json`, so detached copies
+//! survive a restart or a crash.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,12 +30,14 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{AppError, Result};
-use crate::log::Channel;
+use crate::log::{Channel, Logger};
 use crate::session::{sh_command, Session};
 
 const DEBOUNCE: Duration = Duration::from_millis(500);
 /// Larger files are read into memory to edit: refuse beyond this.
 const MAX_EDIT_BYTES: u64 = 100 * 1024 * 1024;
+const MANIFEST: &str = "edits.json";
+const DETACHED_MESSAGE: &str = "verranno caricate alla prossima connessione";
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -43,13 +51,17 @@ pub enum EditState {
     Error,
     /// The upload was not confirmed (protected connection): local changes only.
     Unconfirmed,
+    /// Local changes kept while the connection is closed; uploaded on reconnect.
+    Detached,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditInfo {
     pub id: u64,
-    pub session_id: u64,
+    /// `None` while detached.
+    pub session_id: Option<u64>,
+    pub connection_id: String,
     pub host: String,
     pub remote_path: String,
     pub local_path: String,
@@ -104,7 +116,7 @@ pub enum EditEvent {
 type Sink = Arc<dyn Fn(EditEvent) + Send + Sync>;
 
 /// What the remote file looked like when we last synced with it.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct RemoteState {
     size: u64,
     modified: Option<u64>,
@@ -112,8 +124,24 @@ struct RemoteState {
     sha256: Option<String>,
 }
 
+/// One entry of the manifest: enough to reattach a copy after a restart.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedEdit {
+    connection_id: String,
+    host: String,
+    remote_path: String,
+    local_path: String,
+    remote: RemoteState,
+    synced_hash: String,
+    confirm_saves: bool,
+    uploads: u64,
+    last_sync_at: u64,
+}
+
 struct Edit {
-    session: Arc<Session>,
+    /// `None` while detached.
+    session: Mutex<Option<Arc<Session>>>,
     info: Mutex<EditInfo>,
     remote: Mutex<RemoteState>,
     /// Hash of the local content last uploaded or downloaded.
@@ -128,6 +156,7 @@ struct Edit {
 
 pub struct EditManager {
     root: PathBuf,
+    logger: Arc<Logger>,
     sink: Sink,
     next_id: AtomicU64,
     edits: Mutex<HashMap<u64, Arc<Edit>>>,
@@ -136,15 +165,114 @@ pub struct EditManager {
 }
 
 impl EditManager {
-    /// `root` holds one private subdirectory per open file.
-    pub fn new(root: PathBuf, sink: Sink) -> Arc<Self> {
-        Arc::new(Self {
+    /// `root` holds one private subdirectory per open file and the manifest;
+    /// copies with changes left by a previous run come back detached.
+    pub fn new(root: PathBuf, logger: Arc<Logger>, sink: Sink) -> Arc<Self> {
+        let manager = Arc::new(Self {
             root,
+            logger,
             sink,
             next_id: AtomicU64::new(1),
             edits: Mutex::new(HashMap::new()),
             launch_editor: AtomicBool::new(true),
-        })
+        });
+        manager.restore();
+        manager
+    }
+
+    fn restore(&self) {
+        let path = self.root.join(MANIFEST);
+        let Ok(bytes) = std::fs::read(&path) else { return };
+        let saved: Vec<SavedEdit> = match serde_json::from_slice(&bytes) {
+            Ok(saved) => saved,
+            Err(e) => {
+                return self
+                    .logger
+                    .start(None, Channel::Local, "edit-restore", path.to_string_lossy())
+                    .fail(e);
+            }
+        };
+        for entry in saved {
+            let op = self.logger.start(Some(&entry.host), Channel::Local, "edit-restore", entry.remote_path.clone());
+            let content = match std::fs::read(&entry.local_path) {
+                Ok(content) => content,
+                Err(e) => {
+                    op.fail(format!("copia locale {}: {e}", entry.local_path));
+                    continue;
+                }
+            };
+            if sha256_hex(&content) == entry.synced_hash {
+                remove_copy(&entry.local_path);
+                op.ok(Some("nessuna modifica da caricare: copia rimossa".into()));
+                continue;
+            }
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let edit = Arc::new(Edit {
+                session: Mutex::new(None),
+                info: Mutex::new(EditInfo {
+                    id,
+                    session_id: None,
+                    connection_id: entry.connection_id,
+                    host: entry.host,
+                    remote_path: entry.remote_path,
+                    local_path: entry.local_path,
+                    state: EditState::Detached,
+                    uploads: entry.uploads,
+                    last_sync_at: entry.last_sync_at,
+                    error: Some(DETACHED_MESSAGE.into()),
+                }),
+                remote: Mutex::new(entry.remote),
+                synced_hash: Mutex::new(entry.synced_hash),
+                conflict_reply: Mutex::new(None),
+                confirm_saves: AtomicBool::new(entry.confirm_saves),
+                confirm_reply: Mutex::new(None),
+                watcher: Mutex::new(None),
+            });
+            self.edits.lock().unwrap().insert(id, edit);
+            op.ok(Some("modifiche non caricate: in attesa della connessione".into()));
+        }
+        self.save_manifest();
+    }
+
+    /// Records the open files. Written on every change, so it also survives a crash.
+    fn save_manifest(&self) {
+        let saved: Vec<SavedEdit> = self
+            .edits
+            .lock()
+            .unwrap()
+            .values()
+            .map(|edit| {
+                let info = edit.info.lock().unwrap();
+                SavedEdit {
+                    connection_id: info.connection_id.clone(),
+                    host: info.host.clone(),
+                    remote_path: info.remote_path.clone(),
+                    local_path: info.local_path.clone(),
+                    remote: edit.remote.lock().unwrap().clone(),
+                    synced_hash: edit.synced_hash.lock().unwrap().clone(),
+                    confirm_saves: edit.confirm_saves.load(Ordering::Relaxed),
+                    uploads: info.uploads,
+                    last_sync_at: info.last_sync_at,
+                }
+            })
+            .collect();
+        let path = self.root.join(MANIFEST);
+        let result = (|| -> std::io::Result<()> {
+            if saved.is_empty() {
+                return match std::fs::remove_file(&path) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                    _ => Ok(()),
+                };
+            }
+            std::fs::create_dir_all(&self.root)?;
+            restrict_permissions(&self.root);
+            let tmp = path.with_extension("json.tmp");
+            std::fs::write(&tmp, serde_json::to_vec_pretty(&saved).map_err(std::io::Error::other)?)?;
+            std::fs::rename(&tmp, &path)
+        })();
+        if let Err(e) = result {
+            self.logger.start(None, Channel::Local, "edit-manifest", path.to_string_lossy()).fail(e);
+        }
     }
 
     pub fn set_launch_editor(&self, launch: bool) {
@@ -180,9 +308,16 @@ impl EditManager {
 
     fn emit(&self, edit: &Edit) {
         (self.sink)(EditEvent::Update(edit.info.lock().unwrap().clone()));
+        self.save_manifest();
     }
 
     fn set_state(&self, edit: &Edit, state: EditState, error: Option<String>) {
+        // A detached copy stays detached whatever a sync still running reports.
+        let (state, error) = if edit.session.lock().unwrap().is_none() {
+            (EditState::Detached, Some(DETACHED_MESSAGE.to_string()))
+        } else {
+            (state, error)
+        };
         {
             let mut info = edit.info.lock().unwrap();
             info.state = state;
@@ -196,6 +331,7 @@ impl EditManager {
     /// `confirm_saves`: ask before the first upload (protected connection).
     pub async fn open(
         self: &Arc<Self>,
+        connection_id: &str,
         session_id: u64,
         session: Arc<Session>,
         remote_path: String,
@@ -208,7 +344,7 @@ impl EditManager {
             .values()
             .find(|e| {
                 let info = e.info.lock().unwrap();
-                info.session_id == session_id && info.remote_path == remote_path
+                info.connection_id == connection_id && info.remote_path == remote_path
             })
             .cloned();
         if let Some(edit) = existing {
@@ -222,7 +358,7 @@ impl EditManager {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .ok_or_else(|| AppError::Other("percorso non valido".into()))?;
-        let dir = self.root.join(short_hash(&format!("{host}\0{remote_path}")));
+        let dir = self.root.join(short_hash(&format!("{connection_id}\0{remote_path}")));
         std::fs::create_dir_all(&dir)?;
         restrict_permissions(&self.root);
         let local_path = dir.join(&file_name);
@@ -232,10 +368,11 @@ impl EditManager {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let edit = Arc::new(Edit {
-            session,
+            session: Mutex::new(Some(session)),
             info: Mutex::new(EditInfo {
                 id,
-                session_id,
+                session_id: Some(session_id),
+                connection_id: connection_id.to_string(),
                 host,
                 remote_path,
                 local_path: local_path.to_string_lossy().into_owned(),
@@ -252,8 +389,24 @@ impl EditManager {
             watcher: Mutex::new(None),
         });
 
+        self.watch(&edit)?;
+        self.edits.lock().unwrap().insert(id, edit.clone());
+
+        self.launch(&local_path.to_string_lossy())?;
+        self.emit(&edit);
+        let info = edit.info.lock().unwrap().clone();
+        Ok(info)
+    }
+
+    /// Watches the copy's directory and syncs after each save; dropping the
+    /// watcher ends the loop.
+    fn watch(self: &Arc<Self>, edit: &Arc<Edit>) -> Result<()> {
+        let local_path = PathBuf::from(&edit.info.lock().unwrap().local_path);
+        let (Some(dir), Some(file_name)) = (local_path.parent(), local_path.file_name()) else {
+            return Err(AppError::Other("percorso non valido".into()));
+        };
         let (tx, rx) = mpsc::unbounded_channel();
-        let watched_name = std::ffi::OsString::from(&file_name);
+        let watched_name = file_name.to_os_string();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             if let Ok(event) = event
                 && event.paths.iter().any(|p| p.file_name() == Some(watched_name.as_os_str()))
@@ -262,19 +415,13 @@ impl EditManager {
             }
         })
         .map_err(|e| AppError::Other(format!("watcher: {e}")))?;
-        notify::Watcher::watch(&mut watcher, &dir, notify::RecursiveMode::NonRecursive)
+        notify::Watcher::watch(&mut watcher, dir, notify::RecursiveMode::NonRecursive)
             .map_err(|e| AppError::Other(format!("watcher: {e}")))?;
         *edit.watcher.lock().unwrap() = Some(watcher);
-
-        self.edits.lock().unwrap().insert(id, edit.clone());
         let manager = self.clone();
         let watched = edit.clone();
         tauri::async_runtime::spawn(async move { manager.watch_loop(watched, rx).await });
-
-        self.launch(&local_path.to_string_lossy())?;
-        self.emit(&edit);
-        let info = edit.info.lock().unwrap().clone();
-        Ok(info)
+        Ok(())
     }
 
     async fn watch_loop(self: Arc<Self>, edit: Arc<Edit>, mut rx: mpsc::UnboundedReceiver<()>) {
@@ -298,6 +445,7 @@ impl EditManager {
 
     /// `force`: upload even if unchanged and without the conflict check.
     async fn sync_with(&self, edit: &Arc<Edit>, force: bool) {
+        let Some(session) = edit.session.lock().unwrap().clone() else { return };
         let local_path = edit.info.lock().unwrap().local_path.clone();
         let Ok(content) = tokio::fs::read(&local_path).await else {
             // Mid-rename or deleted by the editor: wait for the next event.
@@ -310,7 +458,7 @@ impl EditManager {
 
         let remote_path = edit.info.lock().unwrap().remote_path.clone();
         let opened = edit.remote.lock().unwrap().clone();
-        let current = match remote_state(&edit.session, &remote_path, opened.sha256.is_some()).await {
+        let current = match remote_state(&session, &remote_path, opened.sha256.is_some()).await {
             Ok(state) => state,
             Err(e) => return self.set_state(edit, EditState::Error, Some(e.to_string())),
         };
@@ -337,7 +485,7 @@ impl EditManager {
         }
 
         self.set_state(edit, EditState::Uploading, None);
-        match upload(&edit.session, &remote_path, &content).await {
+        match upload(&session, &remote_path, &content).await {
             Ok(mut state) => {
                 if opened.sha256.is_some() {
                     state.sha256 = Some(hash.clone());
@@ -436,6 +584,7 @@ impl EditManager {
     /// Replaces the local copy with the server version; the local content is
     /// saved next to it as "<name> (mia versione)".
     async fn reload(&self, edit: &Arc<Edit>, local_content: &[u8]) {
+        let Some(session) = edit.session.lock().unwrap().clone() else { return };
         let (remote_path, local_path) = {
             let info = edit.info.lock().unwrap();
             (info.remote_path.clone(), PathBuf::from(&info.local_path))
@@ -444,7 +593,7 @@ impl EditManager {
         if let Err(e) = tokio::fs::write(&backup, local_content).await {
             return self.set_state(edit, EditState::Error, Some(format!("backup: {e}")));
         }
-        match download(&edit.session, &remote_path).await {
+        match download(&session, &remote_path).await {
             Ok((content, state)) => {
                 // Update the hash first: the write below triggers the watcher.
                 *edit.synced_hash.lock().unwrap() = sha256_hex(&content);
@@ -481,41 +630,105 @@ impl EditManager {
         if let Some(tx) = edit.confirm_reply.lock().unwrap().take() {
             let _ = tx.send(false);
         }
-        if let Some(dir) = Path::new(&edit.info.lock().unwrap().local_path).parent() {
-            let _ = std::fs::remove_dir_all(dir);
-        }
-        edit.session
-            .launcher
-            .logger
-            .start(Some(&edit.session.launcher.label), Channel::Local, "edit-close", edit.info.lock().unwrap().remote_path.clone())
-            .ok(None);
+        let info = edit.info.lock().unwrap().clone();
+        remove_copy(&info.local_path);
+        self.logger.start(Some(&info.host), Channel::Local, "edit-close", info.remote_path).ok(None);
+        self.save_manifest();
     }
 
+    /// The copy differs from what the server had at the last sync, including
+    /// a save the debounce has not handled yet.
+    fn has_local_changes(edit: &Edit) -> bool {
+        let local_path = edit.info.lock().unwrap().local_path.clone();
+        match std::fs::read(&local_path) {
+            Ok(content) => sha256_hex(&content) != *edit.synced_hash.lock().unwrap(),
+            Err(_) => false,
+        }
+    }
+
+    /// The session is closing: copies without local changes are closed, the
+    /// others are detached until the connection opens again.
     pub fn close_session(&self, session_id: u64) {
-        let ids: Vec<u64> = self
+        let edits: Vec<Arc<Edit>> = self
             .edits
             .lock()
             .unwrap()
             .values()
-            .map(|e| e.info.lock().unwrap().clone())
-            .filter(|i| i.session_id == session_id)
-            .map(|i| i.id)
+            .filter(|e| e.info.lock().unwrap().session_id == Some(session_id))
+            .cloned()
             .collect();
-        for id in ids {
-            self.close(id);
+        for edit in edits {
+            if Self::has_local_changes(&edit) {
+                self.detach(&edit);
+            } else {
+                let id = edit.info.lock().unwrap().id;
+                self.close(id);
+            }
         }
     }
 
-    /// On exit: keep copies with changes that were never uploaded.
-    pub fn close_all_synced(&self) {
-        let ids: Vec<u64> = self
-            .list()
-            .into_iter()
-            .filter(|i| i.state == EditState::Synced)
-            .map(|i| i.id)
+    fn detach(&self, edit: &Edit) {
+        edit.session.lock().unwrap().take();
+        edit.watcher.lock().unwrap().take();
+        // Pending prompts get "not now": reattaching asks again.
+        if let Some(tx) = edit.conflict_reply.lock().unwrap().take() {
+            let _ = tx.send(ConflictChoice::Keep);
+        }
+        if let Some(tx) = edit.confirm_reply.lock().unwrap().take() {
+            let _ = tx.send(false);
+        }
+        let info = {
+            let mut info = edit.info.lock().unwrap();
+            info.session_id = None;
+            info.clone()
+        };
+        self.logger
+            .start(Some(&info.host), Channel::Local, "edit-detach", info.remote_path)
+            .ok(Some("modifiche non caricate: copia locale conservata".into()));
+        self.set_state(edit, EditState::Detached, None);
+    }
+
+    /// A connection opened: its detached copies use the new session and their
+    /// changes are uploaded (conflict check and confirmation as for a save).
+    pub fn attach(self: &Arc<Self>, connection_id: &str, session_id: u64, session: Arc<Session>) {
+        let detached: Vec<Arc<Edit>> = self
+            .edits
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|e| e.session.lock().unwrap().is_none() && e.info.lock().unwrap().connection_id == connection_id)
+            .cloned()
             .collect();
-        for id in ids {
-            self.close(id);
+        for edit in detached {
+            *edit.session.lock().unwrap() = Some(session.clone());
+            let info = {
+                let mut info = edit.info.lock().unwrap();
+                info.session_id = Some(session_id);
+                info.host = session.launcher.label.clone();
+                info.clone()
+            };
+            let op = self.logger.start(Some(&info.host), Channel::Local, "edit-attach", info.remote_path);
+            if let Err(e) = self.watch(&edit) {
+                op.fail(&e);
+                self.set_state(&edit, EditState::Error, Some(e.to_string()));
+                continue;
+            }
+            op.ok(None);
+            self.set_state(&edit, EditState::Synced, None);
+            let manager = self.clone();
+            tauri::async_runtime::spawn(async move { manager.sync(&edit).await });
+        }
+    }
+
+    /// On exit: closes the copies without local changes. The others stay in
+    /// the manifest and come back detached at the next start.
+    pub fn close_unchanged(&self) {
+        let edits: Vec<Arc<Edit>> = self.edits.lock().unwrap().values().cloned().collect();
+        for edit in edits {
+            if !Self::has_local_changes(&edit) {
+                let id = edit.info.lock().unwrap().id;
+                self.close(id);
+            }
         }
     }
 }
@@ -603,6 +816,13 @@ fn open_with_default_app(path: &str) -> Result<()> {
         .spawn()
         .map(|_| ())
         .map_err(|e| AppError::Other(format!("impossibile aprire il file: {e}")))
+}
+
+/// Removes a copy with its private directory.
+fn remove_copy(local_path: &str) {
+    if let Some(dir) = Path::new(local_path).parent() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 fn restrict_permissions(dir: &Path) {

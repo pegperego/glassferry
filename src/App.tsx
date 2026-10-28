@@ -15,6 +15,7 @@ import {
   type AskpassRequest,
   type Connection,
   type Direction,
+  type EditInfo,
   type JobInfo,
   type Target,
 } from "./api";
@@ -23,7 +24,7 @@ import { BottomPanel, type BottomTab } from "./components/BottomPanel";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { ConnectionManager } from "./components/ConnectionManager";
 import { DragGhost } from "./components/DragGhost";
-import { ChooseDialog } from "./components/Dialogs";
+import { ChooseDialog, ConfirmDialog } from "./components/Dialogs";
 import { EditConfirmDialog } from "./components/EditConfirmDialog";
 import { EditConflictDialog } from "./components/EditConflictDialog";
 import { FilePane, type PaneOps } from "./components/FilePane";
@@ -47,6 +48,8 @@ type Modal =
   | { kind: "manager"; startWithImport: boolean }
   /** Both remote panes are in use: which one does `connection` replace? */
   | { kind: "replace"; connection: Connection; startPath?: string; only?: number }
+  /** Closing `slot` detaches open files with changes not uploaded yet: `then` closes it. */
+  | { kind: "disconnect"; slot: number; files: EditInfo[]; then: () => void }
   | null;
 
 function paneOps(target: Target, protection: Protection | null): PaneOps {
@@ -92,7 +95,7 @@ export default function App() {
   const edits = useEdits((message) => setAppError(message));
 
   const localPane = usePane(localListDir, home);
-  const remote = useRemoteSlots((id) => verboseHosts.has(id), edits.dropSession);
+  const remote = useRemoteSlots((id) => verboseHosts.has(id), edits.refresh);
   const { slots, panes } = remote;
   const connected = [0, 1].filter((i) => slots[i].state === "connected");
 
@@ -215,6 +218,19 @@ export default function App() {
     if (connection.localDir && startPath === undefined) void localPane.navigate(connection.localDir);
   };
 
+  /**
+   * Runs `action`, which closes `slot`. When that disconnects a session (the
+   * other pane does not share it) with open files not uploaded yet, asks first.
+   */
+  const guardClose = (slot: number, action: () => void) => {
+    const session = sessionOf(slots[slot]);
+    const shared = session !== null && sessionOf(slots[1 - slot])?.sessionId === session.sessionId;
+    const files =
+      session && !shared ? edits.edits.filter((e) => e.sessionId === session.sessionId && e.state !== "synced") : [];
+    if (files.length === 0) action();
+    else setModal({ kind: "disconnect", slot, files, then: action });
+  };
+
   /** New connection: a free remote pane, or ask which one to replace. */
   const handleConnect = (connectionId: string) => {
     const connection = store?.connections.find((c) => c.id === connectionId);
@@ -325,7 +341,7 @@ export default function App() {
           pane={pane}
           active={activeSide === remoteSide(slot)}
           onActivate={() => activate(remoteSide(slot))}
-          onDisconnect={() => void remote.close(slot)}
+          onDisconnect={() => guardClose(slot, () => void remote.close(slot))}
           onOpenInOther={() => openInOther(slot)}
           transfer={download}
           transferTargets={[
@@ -429,6 +445,7 @@ export default function App() {
           transfers={transfers}
           edits={edits}
           hostColor={hostColor}
+          onReconnect={handleConnect}
           tab={panelTab}
           onTab={(tab) => {
             if (tab === "log") log.markSeen();
@@ -465,15 +482,40 @@ export default function App() {
           title={`Aprire ${modal.connection.name} al posto di…`}
           options={replaceChoices.map((i) => ({
             label: `Sostituisci ${paneName(i)}`,
-            onSelect: () => void openIn(i, modal.connection, modal.startPath),
+            onSelect: () => guardClose(i, () => void openIn(i, modal.connection, modal.startPath)),
           }))}
           onCancel={() => setModal(null)}
         >
           <p>
-            Sono già aperti due pannelli remoti. La connessione sostituita viene chiusa, insieme ai suoi file aperti in
-            modifica, se nessun altro pannello la usa.
+            Sono già aperti due pannelli remoti. La connessione sostituita viene chiusa se nessun altro pannello la usa:
+            i file aperti in modifica senza modifiche da caricare vengono chiusi, gli altri restano in "File aperti" e
+            vengono caricati alla prossima connessione.
           </p>
         </ChooseDialog>
+      )}
+      {modal?.kind === "disconnect" && (
+        <ConfirmDialog
+          title={`Disconnettere ${paneName(modal.slot)}?`}
+          confirmLabel="Disconnetti"
+          onCancel={() => setModal(null)}
+          onConfirm={() => {
+            setModal(null);
+            modal.then();
+          }}
+        >
+          <p>Questi file aperti hanno modifiche non ancora caricate sul server:</p>
+          <ul>
+            {modal.files.map((file) => (
+              <li key={file.id}>
+                <code>{file.remotePath}</code>
+              </li>
+            ))}
+          </ul>
+          <p>
+            Le copie locali non vanno perse: restano in "File aperti" e vengono caricate quando ti ricolleghi a questa
+            connessione, con il controllo dei conflitti. Anche chiudendo l'app vengono ritrovate al riavvio.
+          </p>
+        </ConfirmDialog>
       )}
       <DragGhost />
       {prompts[0] && <AskpassDialog request={prompts[0]} onAnswer={answerPrompt} />}

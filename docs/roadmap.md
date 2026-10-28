@@ -12,7 +12,6 @@ Prima delle funzioni nuove: nessuna perdita di dati e nessun blocco nei casi gi�
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
-| La disconnessione chiude i file aperti anche se non sincronizzati | proposta | 2026-10-27 | Chiedere conferma o tenere la copia locale finché l'utente non decide |
 | Scrittura in place del file modificato | proposta | 2026-10-27 | Mantiene proprietario e permessi, ma se la connessione cade a metà il file resta parziale; valutare una modalità opzionale temporaneo + rename |
 | Conflitti di modifica senza `sha256sum` | proposta | 2026-10-27 | Sugli account solo SFTP una modifica altrui nello stesso secondo e con la stessa dimensione non viene vista (mtime con risoluzione di 1 s in SFTP v3) |
 | Ripresa dei trasferimenti interrotti | proposta | 2026-10-27 | SFTP permette di riprendere da un offset. La voce più grossa della wave: se serve una 0.2 rapida, passa alla wave 2 |

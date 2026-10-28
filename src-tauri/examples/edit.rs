@@ -75,6 +75,7 @@ fn main() {
         let (allow, confirm_count) = (next_confirm.clone(), confirms.clone());
         let manager = EditManager::new(
             work.join("cache"),
+            logger.clone(),
             Arc::new(move |event| match event {
                 EditEvent::Conflict(c) => {
                     *count.lock().unwrap() += 1;
@@ -99,7 +100,7 @@ fn main() {
 
         let check = |label: &str, ok: bool| println!("{} {label}", if ok { "PASS" } else { "FAIL" });
         let settle = || tokio::time::sleep(Duration::from_millis(1500));
-        let info = manager.open(1, session.clone(), remote.to_string_lossy().into_owned(), false).await.unwrap();
+        let info = manager.open("conn", 1, session.clone(), remote.to_string_lossy().into_owned(), false).await.unwrap();
         let local = PathBuf::from(&info.local_path);
         check("local copy matches", std::fs::read(&local).unwrap() == std::fs::read(&remote).unwrap());
         let uploads = || manager.list()[0].uploads;
@@ -159,7 +160,7 @@ fn main() {
         check("close removes local copy", !local.exists() && manager.list().is_empty());
 
         // Protected connection: the first upload waits for a confirmation.
-        let info = manager.open(1, session.clone(), remote.to_string_lossy().into_owned(), true).await.unwrap();
+        let info = manager.open("conn", 1, session.clone(), remote.to_string_lossy().into_owned(), true).await.unwrap();
         let local = PathBuf::from(&info.local_path);
         std::fs::write(&local, "server { listen 5; }\n").unwrap();
         settle().await;
@@ -184,6 +185,58 @@ fn main() {
             *confirms.lock().unwrap() == 2 && std::fs::read_to_string(&remote).unwrap().contains("listen 6;"),
         );
         manager.close(info.id);
+
+        // Disconnect: a copy with changes is detached, an unchanged one closed.
+        let other = work.join("remote/other.txt");
+        std::fs::write(&other, "untouched\n").unwrap();
+        let unchanged = manager.open("conn", 1, session.clone(), other.to_string_lossy().into_owned(), false).await.unwrap();
+        let info = manager.open("conn", 1, session.clone(), remote.to_string_lossy().into_owned(), false).await.unwrap();
+        let local = PathBuf::from(&info.local_path);
+        // Saved just before disconnecting: the debounce has not uploaded it yet.
+        std::fs::write(&local, "server { listen 10; }\n").unwrap();
+        manager.close_session(1);
+        check(
+            "disconnect keeps the changed copy, closes the unchanged one",
+            local.exists()
+                && !PathBuf::from(&unchanged.local_path).exists()
+                && manager.list().len() == 1
+                && state() == EditState::Detached
+                && std::fs::read_to_string(&remote).unwrap().contains("listen 6;"),
+        );
+        std::fs::write(&local, "server { listen 11; }\n").unwrap();
+        settle().await;
+        check(
+            "saves while detached stay local",
+            std::fs::read_to_string(&remote).unwrap().contains("listen 6;") && state() == EditState::Detached,
+        );
+
+        // Restart (or crash): a new manager restores the copy from the manifest.
+        let restarted = EditManager::new(work.join("cache"), logger.clone(), Arc::new(|_| {}));
+        restarted.set_launch_editor(false);
+        let restored = restarted.list();
+        check(
+            "restart restores the detached copy",
+            restored.len() == 1 && restored[0].state == EditState::Detached && restored[0].local_path == info.local_path,
+        );
+        restarted.attach("other-connection", 2, session.clone());
+        check("other connections do not attach it", restarted.list()[0].state == EditState::Detached);
+        restarted.attach("conn", 2, session.clone());
+        settle().await;
+        let attached = &restarted.list()[0];
+        check(
+            "reconnecting uploads the kept changes",
+            std::fs::read_to_string(&remote).unwrap().contains("listen 11;")
+                && attached.state == EditState::Synced
+                && attached.session_id == Some(2),
+        );
+        std::fs::write(&local, "server { listen 12; }\n").unwrap();
+        settle().await;
+        check("saves upload again after reattaching", std::fs::read_to_string(&remote).unwrap().contains("listen 12;"));
+        restarted.close_session(2);
+        check(
+            "synced copies close on disconnect, manifest removed",
+            restarted.list().is_empty() && !local.exists() && !work.join("cache/edits.json").exists(),
+        );
 
         match Arc::try_unwrap(session) {
             Ok(s) => s.close().await,

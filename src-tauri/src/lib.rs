@@ -47,16 +47,26 @@ struct AppState {
     /// Problem met loading `connections.json`, shown once by the UI.
     connections_warning: Mutex<Option<String>>,
     next_session_id: AtomicU64,
-    sessions: Mutex<HashMap<u64, Arc<Session>>>,
+    sessions: Mutex<HashMap<u64, OpenSession>>,
+}
+
+struct OpenSession {
+    connection_id: String,
+    session: Arc<Session>,
 }
 
 impl AppState {
     fn session(&self, id: u64) -> Result<Arc<Session>> {
+        self.open_session(id).map(|(_, session)| session)
+    }
+
+    /// The session and the id of the connection it was opened for.
+    fn open_session(&self, id: u64) -> Result<(String, Arc<Session>)> {
         self.sessions
             .lock()
             .unwrap()
             .get(&id)
-            .cloned()
+            .map(|open| (open.connection_id.clone(), open.session.clone()))
             .ok_or(AppError::SessionNotFound(id))
     }
 }
@@ -192,7 +202,16 @@ async fn connect(state: State<'_, AppState>, connection_id: String, verbose: boo
         home: session.home.to_string_lossy().into_owned(),
         capabilities: session.capabilities.clone(),
     };
-    state.sessions.lock().unwrap().insert(id, Arc::new(session));
+    let session = Arc::new(session);
+    state.sessions.lock().unwrap().insert(
+        id,
+        OpenSession {
+            connection_id: connection_id.clone(),
+            session: session.clone(),
+        },
+    );
+    // Copies with changes left from an earlier session of this connection.
+    state.edits.attach(&connection_id, id, session);
     Ok(result)
 }
 
@@ -215,7 +234,7 @@ async fn local_list_dir(state: State<'_, AppState>, path: String) -> Result<Vec<
 async fn disconnect(state: State<'_, AppState>, session_id: u64) -> Result<()> {
     state.transfers.cancel_session(session_id);
     state.edits.close_session(session_id);
-    let session = state.sessions.lock().unwrap().remove(&session_id);
+    let session = state.sessions.lock().unwrap().remove(&session_id).map(|open| open.session);
     if let Some(session) = session {
         match Arc::try_unwrap(session) {
             Ok(session) => session.close().await,
@@ -375,8 +394,8 @@ fn fs_plan_discard(state: State<'_, AppState>, id: u64) {
 
 #[tauri::command]
 async fn edit_open(state: State<'_, AppState>, session_id: u64, path: String, confirm_saves: bool) -> Result<EditInfo> {
-    let session = state.session(session_id)?;
-    state.edits.open(session_id, session, path, confirm_saves).await
+    let (connection_id, session) = state.open_session(session_id)?;
+    state.edits.open(&connection_id, session_id, session, path, confirm_saves).await
 }
 
 #[tauri::command]
@@ -480,6 +499,7 @@ pub fn run() {
             let edit_root = EditManager::default_root().unwrap_or_else(|| runtime_dir.join("edit"));
             let edits = EditManager::new(
                 edit_root,
+                logger.clone(),
                 Arc::new(move |event| {
                     let _ = match event {
                         EditEvent::Update(info) => handle.emit("edit-update", info),
@@ -560,9 +580,9 @@ pub fn run() {
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
             let state = handle.state::<AppState>();
-            state.edits.close_all_synced();
-            for session in state.sessions.lock().unwrap().values() {
-                session.launcher.stop_master_blocking();
+            state.edits.close_unchanged();
+            for open in state.sessions.lock().unwrap().values() {
+                open.session.launcher.stop_master_blocking();
             }
             state.askpass.remove_socket();
         }

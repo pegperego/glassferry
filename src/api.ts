@@ -242,11 +242,14 @@ export const fsMove = (target: Target, srcDir: string, names: string[], dstDir: 
 export const fsDelete = (target: Target, dir: string, names: string[]) =>
   invoke<DeleteMethod>("fs_delete", { target, dir, names });
 
-export type EditState = "synced" | "uploading" | "conflict" | "error" | "unconfirmed";
+/** `detached`: changes kept while the connection is closed, uploaded when it opens again. */
+export type EditState = "synced" | "uploading" | "conflict" | "error" | "unconfirmed" | "detached";
 
 export interface EditInfo {
   id: number;
-  sessionId: number;
+  /** Null while detached. */
+  sessionId: number | null;
+  connectionId: string;
   host: string;
   remotePath: string;
   localPath: string;

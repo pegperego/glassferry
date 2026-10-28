@@ -34,8 +34,8 @@ export interface Edits {
   reopen: (id: number) => void;
   reveal: (id: number) => void;
   resolve: (id: number, choice: EditChoice) => void;
-  /** Forgets the edits of a session (after disconnect, the backend closed them). */
-  dropSession: (sessionId: number) => void;
+  /** Reloads the list after a disconnect: the backend closed or detached that session's files. */
+  refresh: () => void;
 }
 
 export function useEdits(onError: (message: string) => void): Edits {
@@ -108,10 +108,15 @@ export function useEdits(onError: (message: string) => void): Edits {
       setConflicts((queue) => queue.filter((c) => c.id !== id));
       report(editResolve(id, choice));
     },
-    dropSession: (sessionId) => {
-      setEdits((current) => new Map([...current].filter(([, e]) => e.sessionId !== sessionId)));
-      setConflicts([]);
-      setConfirms([]);
-    },
+    refresh: () =>
+      report(
+        editList().then((list) => {
+          setEdits(new Map(list.map((e) => [e.id, e])));
+          // Prompts of detached files were answered "not now" by the backend.
+          const attached = new Set(list.filter((e) => e.state !== "detached").map((e) => e.id));
+          setConflicts((queue) => queue.filter((c) => attached.has(c.id)));
+          setConfirms((queue) => queue.filter((c) => attached.has(c.id)));
+        }),
+      ),
   };
 }

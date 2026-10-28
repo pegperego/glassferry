@@ -231,6 +231,14 @@ export default function App() {
     else setModal({ kind: "disconnect", slot, files, then: action });
   };
 
+  /** Session open for a connection in one of the remote panes. */
+  const sessionFor = (connectionId: string) => {
+    for (const slot of slots) {
+      if (slot.state === "connected" && slot.connection.id === connectionId) return slot.result.sessionId;
+    }
+    return null;
+  };
+
   /** New connection: a free remote pane, or ask which one to replace. */
   const handleConnect = (connectionId: string) => {
     const connection = store?.connections.find((c) => c.id === connectionId);
@@ -446,6 +454,7 @@ export default function App() {
           edits={edits}
           hostColor={hostColor}
           onReconnect={handleConnect}
+          sessionFor={sessionFor}
           tab={panelTab}
           onTab={(tab) => {
             if (tab === "log") log.markSeen();

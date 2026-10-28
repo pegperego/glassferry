@@ -1493,6 +1493,10 @@ button.link {
   background: var(--danger);
 }
 
+.transfers-error {
+  margin: 6px 10px;
+}
+
 .edit-dot.detached {
   background: #d99a00;
 }

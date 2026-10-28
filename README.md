@@ -17,6 +17,7 @@ Status: MVP complete. The interface is in Italian for now.
   - Drag & drop between panes and from the Finder.
   - Up to two remote panes, side by side or stacked; copies between them run on the server when both show the same connection, and stream through the app between different servers.
   - Files are written to a temporary name and renamed at the end, so a destination file is never left truncated.
+  - Interrupted transfers (cancelled, connection dropped, app closed) can be resumed where they stopped.
 - **File operations.**
   - New folder, rename, move and delete. Never overwrites.
   - Local deletes go to the Trash; remote deletes are permanent and confirmed first.

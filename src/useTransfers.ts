@@ -7,6 +7,7 @@ import {
   transferClearFinished,
   transferConflictRespond,
   transferList,
+  transferResume,
   transferStart,
   type ConflictAction,
   type ConflictRequest,
@@ -28,6 +29,8 @@ export interface Transfers {
     dstSessionId?: number,
   ) => Promise<void>;
   cancel: (jobId: number) => void;
+  /** Continues an interrupted job; it is replaced by a new one. */
+  resume: (jobId: number, sessionId: number, dstSessionId: number | null) => Promise<void>;
   clearFinished: () => void;
   answerConflict: (action: ConflictAction, applyToAll: boolean) => void;
 }
@@ -79,6 +82,15 @@ export function useTransfers(onFinished: (job: JobInfo) => void): Transfers {
     [],
   );
 
+  const resume = useCallback(async (jobId: number, sessionId: number, dstSessionId: number | null) => {
+    await transferResume(jobId, sessionId, dstSessionId);
+    setJobs((current) => {
+      const next = new Map(current);
+      next.delete(jobId);
+      return next;
+    });
+  }, []);
+
   const clearFinished = useCallback(() => {
     void transferClearFinished();
     setJobs((current) => new Map([...current].filter(([, job]) => !isFinished(job))));
@@ -106,6 +118,7 @@ export function useTransfers(onFinished: (job: JobInfo) => void): Transfers {
     conflicts,
     start,
     cancel: (jobId: number) => void transferCancel(jobId),
+    resume,
     clearFinished,
     answerConflict,
   };

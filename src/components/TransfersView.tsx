@@ -9,7 +9,7 @@ const STATE_LABEL: Record<JobInfo["state"], string> = {
   running: "In corso",
   waitingConflict: "In attesa di conferma",
   done: "Completato",
-  failed: "Completato con errori",
+  failed: "Non completato",
   cancelled: "Annullato",
 };
 
@@ -18,9 +18,12 @@ interface Props {
   /** Show only this host's jobs. */
   host: string | null;
   hostColor: (host: string) => string | undefined;
+  sessionFor: (connectionId: string) => number | null;
+  onReconnect: (connectionId: string) => void;
 }
 
-export function TransfersView({ transfers, host, hostColor }: Props) {
+export function TransfersView({ transfers, host, hostColor, sessionFor, onReconnect }: Props) {
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const jobs = host ? transfers.jobs.filter((j) => j.host === host || j.dstHost === host) : transfers.jobs;
   if (transfers.jobs.length === 0) {
     return (
@@ -32,6 +35,7 @@ export function TransfersView({ transfers, host, hostColor }: Props) {
   }
   return (
     <div className="transfers">
+      {resumeError && <p className="error-text transfers-error">{resumeError}</p>}
       {[...jobs].reverse().map((job) => (
         <TransferRow
           key={job.id}
@@ -39,6 +43,10 @@ export function TransfersView({ transfers, host, hostColor }: Props) {
           color={hostColor(job.host)}
           dstColor={job.dstHost ? hostColor(job.dstHost) : undefined}
           onCancel={() => transfers.cancel(job.id)}
+          resume={resumeAction(job, sessionFor, onReconnect, (sessionId, dstSessionId) => {
+            setResumeError(null);
+            transfers.resume(job.id, sessionId, dstSessionId).catch((e) => setResumeError(String(e)));
+          })}
         />
       ))}
     </div>
@@ -51,14 +59,41 @@ const DIRECTION: Record<JobInfo["direction"], { icon: string; title: string }> =
   remote: { icon: "⇄", title: "Copia tra pannelli remoti" },
 };
 
+/** Resuming needs a session of each connection of the job: offer to open the missing one first. */
+function resumeAction(
+  job: JobInfo,
+  sessionFor: (connectionId: string) => number | null,
+  onReconnect: (connectionId: string) => void,
+  run: (sessionId: number, dstSessionId: number | null) => void,
+): { label: string; title: string; run: () => void } | null {
+  if (!job.resumable) return null;
+  const session = sessionFor(job.connectionId);
+  if (session === null) {
+    return { label: `Connetti ${job.host}`, title: "Apri la connessione per riprendere il trasferimento", run: () => onReconnect(job.connectionId) };
+  }
+  if (job.dstConnectionId !== null) {
+    const dst = sessionFor(job.dstConnectionId);
+    if (dst === null) {
+      const dstId = job.dstConnectionId;
+      return { label: `Connetti ${job.dstHost}`, title: "Apri la connessione per riprendere il trasferimento", run: () => onReconnect(dstId) };
+    }
+    return { label: "Riprendi", title: RESUME_TITLE, run: () => run(session, dst) };
+  }
+  return { label: "Riprendi", title: RESUME_TITLE, run: () => run(session, null) };
+}
+
+const RESUME_TITLE =
+  "Continua da dove si è fermato: i file già completi vengono saltati, quelli interrotti ripartono dal punto raggiunto se l'origine non è cambiata";
+
 interface RowProps {
   job: JobInfo;
   color: string | undefined;
   dstColor: string | undefined;
   onCancel: () => void;
+  resume: { label: string; title: string; run: () => void } | null;
 }
 
-function TransferRow({ job, color, dstColor, onCancel }: RowProps) {
+function TransferRow({ job, color, dstColor, onCancel, resume }: RowProps) {
   const [showErrors, setShowErrors] = useState(false);
   const finished = isFinished(job);
   const percent = job.totalBytes > 0 ? Math.min(100, (job.doneBytes / job.totalBytes) * 100) : finished ? 100 : 0;
@@ -126,6 +161,11 @@ function TransferRow({ job, color, dstColor, onCancel }: RowProps) {
       {!finished && (
         <button title="Annulla" onClick={onCancel}>
           ✕
+        </button>
+      )}
+      {resume && (
+        <button title={resume.title} onClick={resume.run}>
+          {resume.label}
         </button>
       )}
     </div>

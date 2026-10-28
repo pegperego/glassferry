@@ -159,11 +159,13 @@ export type JobState = "scanning" | "running" | "waitingConflict" | "done" | "fa
 
 export interface JobInfo {
   id: number;
-  /** Remote side; the source of a remote copy. */
-  sessionId: number;
+  /** Remote side; the source of a remote copy. Null for a job restored after a restart. */
+  sessionId: number | null;
+  connectionId: string;
   host: string;
   /** Destination of a remote copy. */
   dstSessionId: number | null;
+  dstConnectionId: string | null;
   dstHost: string | null;
   direction: Direction;
   srcDir: string;
@@ -181,6 +183,8 @@ export interface JobInfo {
   startedAt: number;
   finishedAt: number | null;
   errors: string[];
+  /** Failed or cancelled: `transferResume` continues it. */
+  resumable: boolean;
 }
 
 export interface ConflictRequest {
@@ -210,6 +214,10 @@ export const transferStart = (
 ) => invoke<number>("transfer_start", { sessionId, direction, srcDir, names, dstDir, dstSessionId });
 
 export const transferCancel = (jobId: number) => invoke<void>("transfer_cancel", { jobId });
+
+/** Resumes an interrupted job on open sessions of its connections; returns the new job id. */
+export const transferResume = (jobId: number, sessionId: number, dstSessionId: number | null) =>
+  invoke<number>("transfer_resume", { jobId, sessionId, dstSessionId });
 
 export const transferList = () => invoke<JobInfo[]>("transfer_list");
 

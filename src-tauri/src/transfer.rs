@@ -13,8 +13,17 @@
 //! Each file keeps several read/write requests in flight (the SFTP protocol
 //! is request/response: one request at a time would be latency-bound), and a
 //! global semaphore limits how many files transfer at once.
+//!
+//! A failed or cancelled job can be resumed on new sessions of the same
+//! connections (`resume`). Its `.gf-part` files are kept with the length
+//! known to be complete (writes finish out of order, so only the contiguous
+//! prefix counts) and the source's size and mtime: the resume continues from
+//! there when the source is unchanged, skips files whose destination already
+//! matches the source, and redoes the rest. Server-side copies always
+//! restart. Interrupted jobs are recorded in a manifest, so they can be
+//! resumed after a restart or a crash too.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -28,7 +37,7 @@ use openssh_sftp_client::file::File as SftpFile;
 use openssh_sftp_client::metadata::{MetaDataBuilder, Permissions, RawPermissions};
 use openssh_sftp_client::UnixTimeStamp;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncReadExt, AsyncSeek, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::{oneshot, Semaphore};
 
 use crate::entry::EntryKind;
@@ -45,6 +54,7 @@ const CHUNK_LEN: u32 = 256 * 1024;
 const PART_SUFFIX: &str = ".gf-part";
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
 const MAX_REPORTED_ERRORS: usize = 50;
+const INTERRUPTED_BY_EXIT: &str = "interrotto: l'app è stata chiusa";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -66,7 +76,7 @@ pub enum CopyStrategy {
     Stream,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum JobState {
     Scanning,
@@ -77,15 +87,18 @@ pub enum JobState {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobInfo {
     pub id: u64,
-    /// Remote side (source for remote copies).
-    pub session_id: u64,
+    /// Remote side (source for remote copies); `None` for a job restored
+    /// from the manifest, which has no session until it is resumed.
+    pub session_id: Option<u64>,
+    pub connection_id: String,
     pub host: String,
     /// Destination of a remote copy.
     pub dst_session_id: Option<u64>,
+    pub dst_connection_id: Option<String>,
     pub dst_host: Option<String>,
     pub direction: Direction,
     pub src_dir: String,
@@ -105,6 +118,36 @@ pub struct JobInfo {
     pub started_at: u64,
     pub finished_at: Option<u64>,
     pub errors: Vec<String>,
+    /// Failed or cancelled: `resume` can continue it.
+    pub resumable: bool,
+}
+
+/// One side of a job: a session and the connection it was opened for.
+pub struct Endpoint {
+    pub session_id: u64,
+    pub connection_id: String,
+    pub session: Arc<Session>,
+}
+
+/// Where an interrupted file can continue: its `.gf-part` holds the first
+/// `offset` bytes of a source that had this size and mtime.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PartPoint {
+    offset: u64,
+    size: u64,
+    modified: Option<u64>,
+}
+
+/// An interrupted job as the manifest keeps it.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedJob {
+    info: JobInfo,
+    /// "Apply to all" answer given before the interruption.
+    policy: Policy,
+    /// Relative path → part file left in the destination.
+    parts: HashMap<String, PartPoint>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -133,7 +176,8 @@ pub struct ConflictRequest {
     pub dst_modified: Option<u64>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 enum Policy {
     Ask,
     OverwriteAll,
@@ -161,6 +205,10 @@ struct Job {
     policy: tokio::sync::Mutex<Policy>,
     /// Running files: relative path -> start order, for the `current` field.
     running: Mutex<Vec<String>>,
+    /// Started by `resume`: destinations matching the source count as done.
+    resumed: bool,
+    /// Part files to continue (from the interrupted run) or left by this one.
+    parts: Mutex<HashMap<String, PartPoint>>,
 }
 
 impl Job {
@@ -206,28 +254,48 @@ impl Job {
         info.current = self.running.lock().unwrap().first().cloned();
         info
     }
+
+    fn saved(&self) -> SavedJob {
+        SavedJob {
+            info: self.snapshot(),
+            // Locked only while a conflict is being asked: no answer yet.
+            policy: self.policy.try_lock().map(|p| *p).unwrap_or(Policy::Ask),
+            parts: self.parts.lock().unwrap().clone(),
+        }
+    }
+
+    fn is_finished(&self) -> bool {
+        matches!(self.info.lock().unwrap().state, JobState::Done | JobState::Failed | JobState::Cancelled)
+    }
 }
 
 pub struct TransferManager {
     logger: Arc<Logger>,
     sink: Sink,
+    /// Interrupted jobs, for resuming after a restart; `None` in tests.
+    manifest: Option<PathBuf>,
     next_id: AtomicU64,
     jobs: Mutex<HashMap<u64, Arc<Job>>>,
+    /// Interrupted jobs read from the manifest: no session until resumed.
+    restored: Mutex<HashMap<u64, SavedJob>>,
     file_slots: Arc<Semaphore>,
     /// Pending conflict prompts: id -> (job id, answer channel).
     conflicts: Mutex<HashMap<u64, (u64, ConflictReply)>>,
 }
 
 impl TransferManager {
-    pub fn new(logger: Arc<Logger>, sink: Sink) -> Arc<Self> {
+    pub fn new(logger: Arc<Logger>, manifest: Option<PathBuf>, sink: Sink) -> Arc<Self> {
         let manager = Arc::new(Self {
             logger,
             sink,
+            manifest,
             next_id: AtomicU64::new(1),
             jobs: Mutex::new(HashMap::new()),
+            restored: Mutex::new(HashMap::new()),
             file_slots: Arc::new(Semaphore::new(PARALLEL_FILES)),
             conflicts: Mutex::new(HashMap::new()),
         });
+        manager.restore();
         let weak = Arc::downgrade(&manager);
         tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(UPDATE_INTERVAL);
@@ -273,17 +341,115 @@ impl TransferManager {
 
     pub fn list(&self) -> Vec<JobInfo> {
         let mut jobs: Vec<JobInfo> = self.jobs.lock().unwrap().values().map(|j| j.snapshot()).collect();
+        jobs.extend(self.restored.lock().unwrap().values().map(|s| s.info.clone()));
         jobs.sort_by_key(|j| j.id);
         jobs
     }
 
-    /// Forgets finished jobs.
+    fn restore(&self) {
+        let Some(path) = &self.manifest else { return };
+        let Ok(bytes) = std::fs::read(path) else { return };
+        let op = self.logger.start(None, Channel::Local, "transfer-restore", path.to_string_lossy());
+        let saved: Vec<SavedJob> = match serde_json::from_slice(&bytes) {
+            Ok(saved) => saved,
+            Err(e) => return op.fail(e),
+        };
+        let count = saved.len();
+        let mut restored = self.restored.lock().unwrap();
+        for mut job in saved {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let info = &mut job.info;
+            info.id = id;
+            info.session_id = None;
+            info.dst_session_id = None;
+            info.bytes_per_sec = 0;
+            info.current = None;
+            info.resumable = true;
+            if !matches!(info.state, JobState::Failed | JobState::Cancelled) {
+                // Still running when the app stopped.
+                info.state = JobState::Failed;
+                info.finished_at = Some(now_ms());
+                info.errors.push(INTERRUPTED_BY_EXIT.into());
+            }
+            restored.insert(id, job);
+        }
+        op.ok(Some(format!("{count} trasferimenti interrotti")));
+    }
+
+    /// Records unfinished and interrupted jobs; rewritten whenever one starts,
+    /// ends, is resumed or cleared, so a crash leaves the running ones too.
+    fn save_manifest(&self) {
+        let Some(path) = &self.manifest else { return };
+        let mut saved: Vec<SavedJob> = self
+            .jobs
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|j| j.info.lock().unwrap().state != JobState::Done)
+            .map(|j| j.saved())
+            .collect();
+        saved.extend(self.restored.lock().unwrap().values().cloned());
+        saved.sort_by_key(|s| s.info.id);
+        let result = (|| -> std::io::Result<()> {
+            if saved.is_empty() {
+                return match std::fs::remove_file(path) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                    _ => Ok(()),
+                };
+            }
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let tmp = path.with_extension("json.tmp");
+            std::fs::write(&tmp, serde_json::to_vec_pretty(&saved).map_err(std::io::Error::other)?)?;
+            std::fs::rename(&tmp, path)
+        })();
+        if let Err(e) = result {
+            self.logger.start(None, Channel::Local, "transfer-manifest", path.to_string_lossy()).fail(e);
+        }
+    }
+
+    /// Forgets finished jobs; part files they left behind are removed
+    /// (remote ones only while their session is open).
     pub fn clear_finished(&self) {
+        let mut cleared: Vec<(SavedJob, Option<Arc<Session>>)> = Vec::new();
         self.jobs.lock().unwrap().retain(|_, job| {
-            !matches!(
-                job.info.lock().unwrap().state,
-                JobState::Done | JobState::Failed | JobState::Cancelled
-            )
+            if !job.is_finished() {
+                return true;
+            }
+            cleared.push((job.saved(), Some(job.target().clone())));
+            false
+        });
+        cleared.extend(self.restored.lock().unwrap().drain().map(|(_, saved)| (saved, None)));
+        self.save_manifest();
+        for (saved, target) in cleared {
+            self.remove_parts(saved, target);
+        }
+    }
+
+    fn remove_parts(&self, saved: SavedJob, target: Option<Arc<Session>>) {
+        if saved.parts.is_empty() {
+            return;
+        }
+        let info = saved.info;
+        let parts: Vec<String> = saved.parts.keys().map(|rel| part_name(&join(&info.dst_dir, rel))).collect();
+        let host = info.dst_host.clone().unwrap_or(info.host.clone());
+        let op = self.logger.start(Some(&host), Channel::Local, "transfer-cleanup", parts.join(", "));
+        if info.direction == Direction::Download {
+            for part in &parts {
+                let _ = std::fs::remove_file(part);
+            }
+            return op.ok(Some(format!("{} file parziali rimossi", parts.len())));
+        }
+        let Some(target) = target else {
+            return op.fail("connessione chiusa: i file parziali restano sul server");
+        };
+        tauri::async_runtime::spawn(async move {
+            let mut fs = target.sftp.fs();
+            for part in &parts {
+                let _ = fs.remove_file(part).await;
+            }
+            op.ok(Some(format!("{} file parziali rimossi", parts.len())));
         });
     }
 
@@ -309,7 +475,7 @@ impl TransferManager {
             .values()
             .filter(|j| {
                 let info = j.info.lock().unwrap();
-                info.session_id == session_id || info.dst_session_id == Some(session_id)
+                info.session_id == Some(session_id) || info.dst_session_id == Some(session_id)
             })
             .map(|j| j.info.lock().unwrap().id)
             .collect();
@@ -324,25 +490,24 @@ impl TransferManager {
         }
     }
 
-    /// `dst`: destination session of a remote copy (`Direction::Remote`).
-    #[allow(clippy::too_many_arguments)]
+    /// `dst`: destination of a remote copy (`Direction::Remote`).
     pub fn start(
         self: &Arc<Self>,
-        session_id: u64,
-        session: Arc<Session>,
+        src: Endpoint,
         direction: Direction,
         src_dir: String,
         names: Vec<String>,
         dst_dir: String,
-        dst: Option<(u64, Arc<Session>)>,
+        dst: Option<Endpoint>,
     ) -> u64 {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let info = JobInfo {
-            id,
-            session_id,
-            host: session.launcher.label.clone(),
-            dst_session_id: dst.as_ref().map(|(id, _)| *id),
-            dst_host: dst.as_ref().map(|(_, s)| s.launcher.label.clone()),
+            id: 0,
+            session_id: None,
+            connection_id: src.connection_id.clone(),
+            host: src.session.launcher.label.clone(),
+            dst_session_id: None,
+            dst_connection_id: dst.as_ref().map(|d| d.connection_id.clone()),
+            dst_host: dst.as_ref().map(|d| d.session.launcher.label.clone()),
             direction,
             src_dir,
             dst_dir,
@@ -356,21 +521,82 @@ impl TransferManager {
             failed_files: 0,
             current: None,
             bytes_per_sec: 0,
-            started_at: now_ms(),
+            started_at: 0,
             finished_at: None,
             errors: Vec::new(),
+            resumable: false,
         };
+        self.spawn_job(info, src, dst, Policy::Ask, HashMap::new(), false)
+    }
+
+    /// Runs an interrupted job again, as a new job, on sessions of the same
+    /// connections: files already complete are skipped, part files continue
+    /// where they stopped when the source is unchanged.
+    pub fn resume(self: &Arc<Self>, job_id: u64, src: Endpoint, dst: Option<Endpoint>) -> Result<u64> {
+        let live = self.jobs.lock().unwrap().get(&job_id).cloned();
+        let saved = match &live {
+            Some(job) if job.is_finished() && job.info.lock().unwrap().resumable => job.saved(),
+            Some(_) => return Err(AppError::Other("il trasferimento non è interrotto".into())),
+            None => self
+                .restored
+                .lock()
+                .unwrap()
+                .get(&job_id)
+                .cloned()
+                .ok_or_else(|| AppError::Other("trasferimento non trovato".into()))?,
+        };
+        let info = &saved.info;
+        let same_dst = info.dst_connection_id.as_deref() == dst.as_ref().map(|d| d.connection_id.as_str());
+        if info.connection_id != src.connection_id || !same_dst {
+            let both = info.dst_host.as_ref().map(|h| format!(" e {h}")).unwrap_or_default();
+            return Err(AppError::Other(format!("per riprendere servono le connessioni {}{both}", info.host)));
+        }
+        self.jobs.lock().unwrap().remove(&job_id);
+        self.restored.lock().unwrap().remove(&job_id);
+        let mut info = saved.info;
+        info.host = src.session.launcher.label.clone();
+        info.dst_host = dst.as_ref().map(|d| d.session.launcher.label.clone());
+        info.errors.clear();
+        Ok(self.spawn_job(info, src, dst, saved.policy, saved.parts, true))
+    }
+
+    fn spawn_job(
+        self: &Arc<Self>,
+        mut info: JobInfo,
+        src: Endpoint,
+        dst: Option<Endpoint>,
+        policy: Policy,
+        parts: HashMap<String, PartPoint>,
+        resumed: bool,
+    ) -> u64 {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        info.id = id;
+        info.session_id = Some(src.session_id);
+        info.dst_session_id = dst.as_ref().map(|d| d.session_id);
+        info.state = JobState::Scanning;
+        info.total_bytes = 0;
+        info.done_bytes = 0;
+        info.total_files = 0;
+        info.done_files = 0;
+        info.skipped_files = 0;
+        info.failed_files = 0;
+        info.started_at = now_ms();
+        info.finished_at = None;
+        info.resumable = false;
         let job = Arc::new(Job {
-            session,
-            dst_session: dst.map(|(_, s)| s),
+            session: src.session,
+            dst_session: dst.map(|d| d.session),
             info: Mutex::new(info),
             done_bytes: AtomicU64::new(0),
             cancelled: AtomicBool::new(false),
             dirty: AtomicBool::new(true),
-            policy: tokio::sync::Mutex::new(Policy::Ask),
+            policy: tokio::sync::Mutex::new(policy),
             running: Mutex::new(Vec::new()),
+            resumed,
+            parts: Mutex::new(parts),
         });
         self.jobs.lock().unwrap().insert(id, job.clone());
+        self.save_manifest();
         let manager = self.clone();
         tauri::async_runtime::spawn(async move { manager.run(job).await });
         id
@@ -403,7 +629,9 @@ impl TransferManager {
                     i.state = state;
                     i.errors.push(e.to_string());
                     i.finished_at = Some(now_ms());
+                    i.resumable = true;
                 });
+                self.save_manifest();
                 summary.fail(e);
                 return;
             }
@@ -453,10 +681,15 @@ impl TransferManager {
         } else {
             JobState::Done
         };
+        // The part files are final now: record them before the end becomes
+        // visible, then again with the final state.
+        self.save_manifest();
         job.update(|i| {
             i.state = state;
             i.finished_at = Some(now_ms());
+            i.resumable = state != JobState::Done;
         });
+        self.save_manifest();
         let secs = (now_ms() - info.started_at) as f64 / 1000.0;
         let extra = format!(
             "{} file, {}{}{}",
@@ -551,35 +784,74 @@ impl TransferManager {
                 )
             }),
         };
+        let part = part_name(dst);
+        // Part file left by the interrupted run, if any.
+        let point = job.parts.lock().unwrap().remove(&file.rel);
+        let host = job.session.launcher.label.clone();
         if let Some((is_dir, size, modified)) = existing {
             if is_dir {
                 return Err(AppError::Other("esiste già una cartella con lo stesso nome".into()));
+            }
+            // Resume: a destination matching the source (transfers keep the
+            // mtime) was completed before the interruption.
+            if job.resumed && size == file.size && modified.is_some() && modified == file.modified {
+                if point.is_some() {
+                    self.remove_part(job, direction, &part).await;
+                }
+                job.add_bytes(file.size);
+                self.logger.start(Some(&host), Channel::Local, "resume-skip", dst).ok(Some("già completo".into()));
+                return Ok(true);
             }
             if !self.resolve_conflict(job, direction, file, (src, dst), (size, modified)).await? {
                 return Ok(false);
             }
         }
+        let offset = match point {
+            Some(p) if p.size == file.size && p.modified == file.modified && resumable(job, direction) => {
+                self.part_len(job, direction, &part).await.map_or(0, |len| len.min(p.offset))
+            }
+            _ => 0,
+        };
 
         job.running.lock().unwrap().push(file.rel.clone());
-        let host = job.session.launcher.label.clone();
+        let resumed_from = if offset > 0 { format!(" (ripreso da {})", format_bytes(offset)) } else { String::new() };
         let (op_name, detail, equivalent) = match direction {
-            Direction::Upload => ("upload", format!("{src} → {dst}"), job.session.launcher.sftp_equivalent("put", &[src, dst])),
-            Direction::Download => ("download", format!("{src} → {dst}"), job.session.launcher.sftp_equivalent("get", &[src, dst])),
+            Direction::Upload => (
+                "upload",
+                format!("{src} → {dst}{resumed_from}"),
+                job.session.launcher.sftp_equivalent(if offset > 0 { "reput" } else { "put" }, &[src, dst]),
+            ),
+            Direction::Download => (
+                "download",
+                format!("{src} → {dst}{resumed_from}"),
+                job.session.launcher.sftp_equivalent(if offset > 0 { "reget" } else { "get" }, &[src, dst]),
+            ),
             Direction::Remote => (
                 "copy",
-                format!("{src} → {}:{dst}", job.target().launcher.label),
+                format!("{src} → {}:{dst}{resumed_from}", job.target().launcher.label),
                 copy_equivalent(job, src, dst),
             ),
         };
         let mut op = self.logger.start(Some(&host), Channel::Sftp, op_name, detail);
         op.equivalent(equivalent);
         let started = Instant::now();
+        let committed = AtomicU64::new(0);
         let result = match direction {
-            Direction::Download => download(job, src, Path::new(dst), file).await,
-            Direction::Upload => upload(job, Path::new(src), dst, file).await,
-            Direction::Remote => remote_copy(job, src, dst, file).await,
+            Direction::Download => download(job, src, Path::new(dst), file, offset, &committed).await,
+            Direction::Upload => upload(job, Path::new(src), dst, file, offset, &committed).await,
+            Direction::Remote => remote_copy(job, src, dst, file, offset, &committed).await,
         };
         job.running.lock().unwrap().retain(|r| r != &file.rel);
+        if result.is_err() {
+            // Keep what is known to be written for a resume, else clean up.
+            match committed.load(Ordering::Relaxed) {
+                0 => self.remove_part(job, direction, &part).await,
+                offset => {
+                    let point = PartPoint { offset, size: file.size, modified: file.modified };
+                    job.parts.lock().unwrap().insert(file.rel.clone(), point);
+                }
+            }
+        }
         let secs = started.elapsed().as_secs_f64();
         op.result(result, |bytes| {
             Some(if secs > 0.05 {
@@ -589,6 +861,20 @@ impl TransferManager {
             })
         })?;
         Ok(true)
+    }
+
+    async fn part_len(&self, job: &Job, direction: Direction, part: &str) -> Option<u64> {
+        match direction {
+            Direction::Download => tokio::fs::metadata(part).await.ok().map(|m| m.len()),
+            Direction::Upload | Direction::Remote => job.target().sftp.fs().metadata(part).await.ok()?.len(),
+        }
+    }
+
+    async fn remove_part(&self, job: &Job, direction: Direction, part: &str) {
+        let _ = match direction {
+            Direction::Download => tokio::fs::remove_file(part).await.map_err(AppError::from),
+            Direction::Upload | Direction::Remote => job.target().sftp.fs().remove_file(part).await.map_err(AppError::from),
+        };
     }
 
     async fn resolve_conflict(
@@ -807,43 +1093,79 @@ async fn read_at(mut file: SftpFile, offset: u64, len: u32) -> Result<BytesMut> 
     Ok(out)
 }
 
-async fn write_at(mut file: SftpFile, offset: u64, data: Bytes) -> Result<u64> {
+/// Returns the offset and length written.
+async fn write_at(mut file: SftpFile, offset: u64, data: Bytes) -> Result<(u64, u64)> {
     Pin::new(&mut file).start_seek(SeekFrom::Start(offset))?;
     file.write_all(&data).await?;
-    Ok(data.len() as u64)
+    Ok((offset, data.len() as u64))
 }
 
-async fn download(job: &Job, src: &str, dst: &Path, file: &PlannedFile) -> Result<u64> {
-    let part = PathBuf::from(part_name(&dst.to_string_lossy()));
-    let result = download_to(job, src, &part).await;
-    match result {
-        Ok(bytes) => {
-            if let Some(mtime) = file.modified {
-                set_local_mtime(&part, mtime);
-            }
-            if let Some(mode) = file.permissions {
-                // Only for new files: an overwritten file keeps the user's mode.
-                if !dst.exists() {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(&part, std::fs::Permissions::from_mode(mode));
-                }
-            }
-            tokio::fs::rename(&part, dst).await?;
-            Ok(bytes)
+/// End of the part of a file known to be written: writes complete out of
+/// order, so there can be holes past it.
+struct WrittenPrefix {
+    end: u64,
+    /// Completed writes beyond `end`: offset → length.
+    ahead: BTreeMap<u64, u64>,
+}
+
+impl WrittenPrefix {
+    fn new(start: u64) -> Self {
+        Self { end: start, ahead: BTreeMap::new() }
+    }
+
+    fn complete(&mut self, offset: u64, len: u64) -> u64 {
+        self.ahead.insert(offset, len);
+        while let Some(len) = self.ahead.remove(&self.end) {
+            self.end += len;
         }
-        Err(e) => {
-            let _ = tokio::fs::remove_file(&part).await;
-            Err(e)
-        }
+        self.end
     }
 }
 
-async fn download_to(job: &Job, src: &str, part: &Path) -> Result<u64> {
+/// Opens the remote part file: from scratch, or kept as is to continue at `offset`.
+async fn open_remote_part(session: &Session, part: &str, offset: u64) -> Result<SftpFile> {
+    let mut options = session.sftp.options();
+    options.write(true);
+    if offset == 0 {
+        options.create(true).truncate(true);
+    }
+    Ok(options.open(part).await?)
+}
+
+/// `offset`: bytes of the part file to keep (resume). `committed` tracks the
+/// length known to be written, for a later resume if this fails.
+async fn download(job: &Job, src: &str, dst: &Path, file: &PlannedFile, offset: u64, committed: &AtomicU64) -> Result<u64> {
+    let part = PathBuf::from(part_name(&dst.to_string_lossy()));
+    let bytes = download_to(job, src, &part, offset, committed).await?;
+    if let Some(mtime) = file.modified {
+        set_local_mtime(&part, mtime);
+    }
+    if let Some(mode) = file.permissions {
+        // Only for new files: an overwritten file keeps the user's mode.
+        if !dst.exists() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&part, std::fs::Permissions::from_mode(mode));
+        }
+    }
+    tokio::fs::rename(&part, dst).await?;
+    Ok(bytes)
+}
+
+async fn download_to(job: &Job, src: &str, part: &Path, start: u64, committed: &AtomicU64) -> Result<u64> {
     let remote = job.session.sftp.open(src).await?;
     let chunk = CHUNK_LEN;
-    let mut out = tokio::fs::File::create(part).await?;
-    let mut offset = 0u64;
-    let mut written = 0u64;
+    let mut out = if start > 0 {
+        let mut out = tokio::fs::OpenOptions::new().write(true).open(part).await?;
+        out.set_len(start).await?;
+        out.seek(SeekFrom::Start(start)).await?;
+        out
+    } else {
+        tokio::fs::File::create(part).await?
+    };
+    job.add_bytes(start);
+    committed.store(start, Ordering::Relaxed);
+    let mut offset = start;
+    let mut written = start;
     let mut eof = false;
     let mut inflight = FuturesOrdered::new();
     loop {
@@ -858,6 +1180,8 @@ async fn download_to(job: &Job, src: &str, part: &Path) -> Result<u64> {
         job.check_cancelled()?;
         out.write_all(&data).await?;
         written += data.len() as u64;
+        // Sequential writes: everything up to here is in the file.
+        committed.store(written, Ordering::Relaxed);
         job.add_bytes(data.len() as u64);
         if data.len() < chunk as usize {
             // End of file: drop the requests issued beyond it.
@@ -870,16 +1194,16 @@ async fn download_to(job: &Job, src: &str, part: &Path) -> Result<u64> {
     Ok(written)
 }
 
-async fn upload(job: &Job, src: &Path, dst: &str, file: &PlannedFile) -> Result<u64> {
+async fn upload(job: &Job, src: &Path, dst: &str, file: &PlannedFile, offset: u64, committed: &AtomicU64) -> Result<u64> {
     let part = part_name(dst);
     let existed = job.session.sftp.fs().metadata(dst).await.is_ok();
-    let result = upload_to(job, src, &part).await;
+    let result = upload_to(job, src, &part, offset, committed).await;
     finish_remote(&job.session, result, &part, dst, existed, file).await
 }
 
 /// Puts a completed `.gf-part` in place on `session`: mtime, mode (new
 /// files only), then rename (posix-rename replaces in one step). On error
-/// the part file is removed.
+/// the part file stays: the caller keeps it for a resume or removes it.
 async fn finish_remote(
     session: &Session,
     copied: Result<u64>,
@@ -889,8 +1213,9 @@ async fn finish_remote(
     file: &PlannedFile,
 ) -> Result<u64> {
     let mut fs = session.sftp.fs();
-    match copied {
-        Ok(bytes) => {
+    let bytes = copied?;
+    {
+        {
             let mut meta = MetaDataBuilder::new();
             if let Some(mtime) = file.modified.and_then(|s| u32::try_from(s).ok()).and_then(UnixTimeStamp::from_raw) {
                 meta.time(mtime, mtime);
@@ -902,15 +1227,8 @@ async fn finish_remote(
             if existed && !session.sftp.support_posix_rename() {
                 fs.remove_file(dst).await?;
             }
-            if let Err(e) = fs.rename(part, dst).await {
-                let _ = fs.remove_file(part).await;
-                return Err(e.into());
-            }
+            fs.rename(part, dst).await?;
             Ok(bytes)
-        }
-        Err(e) => {
-            let _ = fs.remove_file(part).await;
-            Err(e)
         }
     }
 }
@@ -928,6 +1246,11 @@ pub fn check_same_session_copy(src_dir: &str, names: &[String], dst_dir: &str) -
         }
     }
     Ok(())
+}
+
+/// Can a file of this job continue from a part file? Server-side copies cannot.
+fn resumable(job: &Job, direction: Direction) -> bool {
+    direction != Direction::Remote || job.copy_strategy() == CopyStrategy::Stream
 }
 
 pub fn copy_strategy(src: &Arc<Session>, dst: &Arc<Session>) -> CopyStrategy {
@@ -962,14 +1285,15 @@ fn copy_equivalent(job: &Job, src: &str, dst: &str) -> String {
     }
 }
 
-async fn remote_copy(job: &Job, src: &str, dst: &str, file: &PlannedFile) -> Result<u64> {
+/// Only streamed copies resume (`offset`): server-side ones restart.
+async fn remote_copy(job: &Job, src: &str, dst: &str, file: &PlannedFile, offset: u64, committed: &AtomicU64) -> Result<u64> {
     let target = job.target();
     let part = part_name(dst);
     let existed = target.sftp.fs().metadata(dst).await.is_ok();
     let copied = match job.copy_strategy() {
         CopyStrategy::CopyData => copy_data(job, src, &part).await,
         CopyStrategy::Shell => copy_shell(job, src, &part).await,
-        CopyStrategy::Stream => relay_to(job, src, &part).await,
+        CopyStrategy::Stream => relay_to(job, src, &part, offset, committed).await,
     };
     finish_remote(target, copied, &part, dst, existed, file).await
 }
@@ -1000,11 +1324,14 @@ async fn copy_shell(job: &Job, src: &str, part: &str) -> Result<u64> {
 /// Streams `src` (source session) into `part` (destination session):
 /// reads and writes both keep `REQUESTS_IN_FLIGHT` requests going, and at
 /// most that many chunks are held in memory.
-async fn relay_to(job: &Job, src: &str, part: &str) -> Result<u64> {
+async fn relay_to(job: &Job, src: &str, part: &str, start: u64, committed: &AtomicU64) -> Result<u64> {
     let input = job.session.sftp.open(src).await?;
-    let output = job.target().sftp.options().write(true).create(true).truncate(true).open(part).await?;
+    let output = open_remote_part(job.target(), part, start).await?;
     let chunk = CHUNK_LEN;
-    let (mut read_offset, mut write_offset, mut written) = (0u64, 0u64, 0u64);
+    let (mut read_offset, mut write_offset, mut written) = (start, start, start);
+    let mut prefix = WrittenPrefix::new(start);
+    job.add_bytes(start);
+    committed.store(start, Ordering::Relaxed);
     let mut eof = false;
     let mut reads = FuturesOrdered::new();
     let mut writes = FuturesUnordered::new();
@@ -1014,10 +1341,11 @@ async fn relay_to(job: &Job, src: &str, part: &str) -> Result<u64> {
             read_offset += chunk as u64;
         }
         while writes.len() >= REQUESTS_IN_FLIGHT {
-            let Some(n) = writes.next().await else { break };
-            let n: u64 = n?;
+            let Some(done) = writes.next().await else { break };
+            let (at, n): (u64, u64) = done?;
             written += n;
             job.add_bytes(n);
+            committed.store(prefix.complete(at, n), Ordering::Relaxed);
         }
         let Some(data) = reads.next().await else { break };
         let data = data?;
@@ -1032,30 +1360,27 @@ async fn relay_to(job: &Job, src: &str, part: &str) -> Result<u64> {
             reads = FuturesOrdered::new();
         }
     }
-    while let Some(n) = writes.next().await {
-        let n = n?;
+    while let Some(done) = writes.next().await {
+        let (at, n) = done?;
         written += n;
         job.add_bytes(n);
+        committed.store(prefix.complete(at, n), Ordering::Relaxed);
     }
     output.close().await?;
     drop(input);
     Ok(written)
 }
 
-async fn upload_to(job: &Job, src: &Path, part: &str) -> Result<u64> {
+async fn upload_to(job: &Job, src: &Path, part: &str, start: u64, committed: &AtomicU64) -> Result<u64> {
     let mut local = tokio::fs::File::open(src).await?;
-    let remote = job
-        .session
-        .sftp
-        .options()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(part)
-        .await?;
+    local.seek(SeekFrom::Start(start)).await?;
+    let remote = open_remote_part(&job.session, part, start).await?;
     let chunk = CHUNK_LEN as usize;
-    let mut offset = 0u64;
-    let mut written = 0u64;
+    let mut offset = start;
+    let mut written = start;
+    let mut prefix = WrittenPrefix::new(start);
+    job.add_bytes(start);
+    committed.store(start, Ordering::Relaxed);
     let mut local_eof = false;
     let mut inflight = FuturesUnordered::new();
     loop {
@@ -1078,10 +1403,11 @@ async fn upload_to(job: &Job, src: &Path, part: &str) -> Result<u64> {
             offset += filled as u64;
         }
         let Some(result) = inflight.next().await else { break };
-        let n = result?;
-        job.check_cancelled()?;
+        let (at, n) = result?;
         written += n;
         job.add_bytes(n);
+        committed.store(prefix.complete(at, n), Ordering::Relaxed);
+        job.check_cancelled()?;
     }
     remote.close().await?;
     Ok(written)
@@ -1136,6 +1462,16 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn written_prefix_ignores_holes() {
+        let mut prefix = WrittenPrefix::new(100);
+        // Writes at 100, 110, 120 (10 bytes each) complete out of order.
+        assert_eq!(prefix.complete(120, 10), 100);
+        assert_eq!(prefix.complete(100, 10), 110);
+        assert_eq!(prefix.complete(110, 10), 130);
+        assert_eq!(prefix.complete(140, 5), 130);
+    }
 
     #[test]
     fn scans_local_tree_parents_first_and_skips_dir_symlinks() {

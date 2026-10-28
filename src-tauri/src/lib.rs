@@ -60,6 +60,15 @@ impl AppState {
         self.open_session(id).map(|(_, session)| session)
     }
 
+    fn endpoint(&self, id: u64) -> Result<transfer::Endpoint> {
+        let (connection_id, session) = self.open_session(id)?;
+        Ok(transfer::Endpoint {
+            session_id: id,
+            connection_id,
+            session,
+        })
+    }
+
     /// The session and the id of the connection it was opened for.
     fn open_session(&self, id: u64) -> Result<(String, Arc<Session>)> {
         self.sessions
@@ -289,20 +298,26 @@ fn transfer_start(
     dst_dir: String,
     dst_session_id: Option<u64>,
 ) -> Result<u64> {
-    let session = state.session(session_id)?;
+    let src = state.endpoint(session_id)?;
     let dst = match (direction, dst_session_id) {
         (Direction::Remote, Some(id)) => {
             if id == session_id {
                 transfer::check_same_session_copy(&src_dir, &names, &dst_dir)?;
             }
-            Some((id, state.session(id)?))
+            Some(state.endpoint(id)?)
         }
         (Direction::Remote, None) => return Err(AppError::Other("manca la sessione di destinazione".into())),
         _ => None,
     };
-    Ok(state
-        .transfers
-        .start(session_id, session, direction, src_dir, names, dst_dir, dst))
+    Ok(state.transfers.start(src, direction, src_dir, names, dst_dir, dst))
+}
+
+/// Resumes an interrupted job on open sessions of the same connections.
+#[tauri::command]
+fn transfer_resume(state: State<'_, AppState>, job_id: u64, session_id: u64, dst_session_id: Option<u64>) -> Result<u64> {
+    let src = state.endpoint(session_id)?;
+    let dst = dst_session_id.map(|id| state.endpoint(id)).transpose()?;
+    state.transfers.resume(job_id, src, dst)
 }
 
 #[tauri::command]
@@ -488,6 +503,7 @@ pub fn run() {
             let handle = app.handle().clone();
             let transfers = TransferManager::new(
                 logger.clone(),
+                ConnectionStore::default_dir().map(|d| d.join("transfers.json")),
                 Arc::new(move |event| {
                     let _ = match event {
                         TransferEvent::Updates(jobs) => handle.emit("transfer-update", jobs),
@@ -555,6 +571,7 @@ pub fn run() {
             log_open_dir,
             transfer_start,
             transfer_cancel,
+            transfer_resume,
             transfer_list,
             transfer_clear_finished,
             transfer_conflict_respond,

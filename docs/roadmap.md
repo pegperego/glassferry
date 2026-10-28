@@ -12,7 +12,6 @@ Prima delle funzioni nuove: nessuna perdita di dati e nessun blocco nei casi gi�
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
-| Ripresa dei trasferimenti interrotti | proposta | 2026-10-27 | SFTP permette di riprendere da un offset. La voce più grossa della wave: se serve una 0.2 rapida, passa alla wave 2 |
 | Prova con configurazioni ssh complesse | proposta | 2026-10-27 | ProxyJump, 1Password (`IdentityAgent`), 2FA/TOTP, `Match`: non presenti nel config usato per la prova sul campo |
 | Pacchetti Linux (AppImage / deb / rpm) | in corso | 2026-10-27 | Prodotti da `release.yml`; da provare su una macchina Linux vera, finora l'app è stata usata solo su macOS |
 

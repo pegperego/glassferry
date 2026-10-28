@@ -14,7 +14,7 @@ use glassferry_lib::log::Logger;
 use glassferry_lib::runtime_dir;
 use glassferry_lib::session::{Session, SshLauncher};
 use glassferry_lib::transfer::{
-    copy_strategy, ConflictAction, CopyStrategy, Direction, JobInfo, JobState, TransferEvent, TransferManager,
+    Endpoint, copy_strategy, ConflictAction, CopyStrategy, Direction, JobInfo, JobState, TransferEvent, TransferManager,
 };
 
 fn main() {
@@ -70,6 +70,7 @@ fn main() {
         let (seen, manager_cell) = (conflicts.clone(), cell.clone());
         let manager = TransferManager::new(
             logger.clone(),
+            None,
             Arc::new(move |event| {
                 if let TransferEvent::Conflict(req) = event {
                     seen.lock().unwrap().push(req.commands.clone());
@@ -92,13 +93,12 @@ fn main() {
         let check = |label: &str, ok: bool| println!("{} {label}", if ok { "PASS" } else { "FAIL" });
         let copy = |from: &Arc<Session>, to: &Arc<Session>, dst: &Path| {
             manager.start(
-                1,
-                from.clone(),
+                Endpoint { session_id: 1, connection_id: "a".into(), session: from.clone() },
                 Direction::Remote,
                 src.to_string_lossy().into_owned(),
                 vec!["tree".into()],
                 dst.to_string_lossy().into_owned(),
-                Some((2, to.clone())),
+                Some(Endpoint { session_id: 2, connection_id: "b".into(), session: to.clone() }),
             )
         };
         let identical = |dst: &Path| {

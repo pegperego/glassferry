@@ -12,7 +12,7 @@ use glassferry_lib::askpass::{AskpassServer, PromptKind};
 use glassferry_lib::log::{Logger, Status};
 use glassferry_lib::runtime_dir;
 use glassferry_lib::session::{Session, SshLauncher};
-use glassferry_lib::transfer::{ConflictAction, Direction, JobInfo, JobState, TransferEvent, TransferManager};
+use glassferry_lib::transfer::{ConflictAction, Direction, Endpoint, JobInfo, JobState, TransferEvent, TransferManager};
 
 fn main() {
     if let Some(code) = glassferry_lib::askpass::run_helper_if_requested() {
@@ -75,6 +75,7 @@ fn main() {
         let (latest_sink, cell, conflict_count) = (latest.clone(), manager_cell.clone(), conflicts.clone());
         let manager = TransferManager::new(
             logger.clone(),
+            None,
             Arc::new(move |event| match event {
                 TransferEvent::Updates(jobs) => latest_sink.lock().unwrap().extend(jobs),
                 TransferEvent::Conflict(req) => {
@@ -107,8 +108,7 @@ fn main() {
 
         let run = |direction, from: &Path, names: Vec<&str>, to: &Path| {
             manager.start(
-                1,
-                session.clone(),
+                Endpoint { session_id: 1, connection_id: "conn".into(), session: session.clone() },
                 direction,
                 from.to_string_lossy().into_owned(),
                 names.into_iter().map(String::from).collect(),
@@ -143,9 +143,10 @@ fn main() {
         let leftovers = std::fs::read_dir(work.join("back/tree"))
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".gf-part") || e.file_name() == "big.bin")
+            .filter(|e| e.file_name() == "big.bin")
             .count();
-        println!("cancel: state={:?} leftovers={leftovers}", info.state);
+        // The .gf-part stays for a resume (see the resume example).
+        println!("cancel: state={:?} resumable={} completed files={leftovers}", info.state, info.resumable);
 
         let mtime_src = std::fs::metadata(src.join("big.bin")).unwrap().modified().unwrap();
         let mtime_back = std::fs::metadata(back.join("big.bin")).unwrap().modified().unwrap();

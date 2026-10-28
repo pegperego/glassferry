@@ -69,5 +69,5 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Nuovo nome Glassferry e nuova icona | `8884374` |
 | Fasi 2–4 provate nell'app (2026-10-28) | — |
 | Pubblicazione su [GitHub](https://github.com/pegperego/glassferry) (2026-10-28) | — |
-| CI (test e clippy su macOS e Linux) e workflow di release con build macOS firmate ad-hoc | |
+| CI (test e clippy su macOS e Linux) e workflow di release con build macOS firmate ad-hoc | `ee45aaa` |
 | Prova sul campo con i server reali: esito positivo (2026-10-27) | — |

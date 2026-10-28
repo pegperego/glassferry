@@ -88,3 +88,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | CI (test e clippy su macOS e Linux) e workflow di release con build macOS firmate ad-hoc | `ee45aaa` |
 | Prova sul campo con i server reali: esito positivo (2026-10-27) | — |
 | Le modifiche ai file aperti non si perdono: alla disconnessione e all'uscita restano "non connesse" e vengono caricate alla prossima connessione | `4c98bc7` |
+| Salvataggio dei file modificati con temporaneo + posix-rename, scrittura diretta solo quando la sostituzione perderebbe link, proprietario o gruppo | `0264fff` |

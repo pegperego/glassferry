@@ -88,3 +88,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Pubblicazione su [GitHub](https://github.com/pegperego/glassferry) (2026-10-28) | — |
 | CI (test e clippy su macOS e Linux) e workflow di release con build macOS firmate ad-hoc | `ee45aaa` |
 | Prova sul campo con i server reali: esito positivo (2026-10-27) | — |
+| Le modifiche ai file aperti non si perdono: alla disconnessione e all'uscita restano "non connesse" e vengono caricate alla prossima connessione | `4c98bc7` |

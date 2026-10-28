@@ -86,3 +86,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Ripresa dei trasferimenti interrotti (annullati, connessione caduta, app chiusa) dal punto raggiunto | `5d8b178` |
 | Schermata Impostazioni (⌘,) e binario `ssh` configurabile | `01f4253` |
 | Terminale di sistema nella cartella del pannello (⌥⌘T), locale o con una nuova connessione ssh, app configurabile | `2dd80a4` |
+| Segnalibri di cartelle per connessione e locali (★, ⌘D, palette ⌘K) | `e580830` |

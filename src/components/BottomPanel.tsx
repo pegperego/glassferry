@@ -43,7 +43,13 @@ export function BottomPanel({ log, transfers, edits, hostColor, tab, onTab, open
   /** Host filter of the Trasferimenti and File aperti tabs. */
   const [itemHost, setItemHost] = useState<string | null>(null);
   const itemHosts = useMemo(
-    () => [...new Set([...transfers.jobs.map((j) => j.host), ...edits.edits.map((e) => e.host)])].sort(),
+    () =>
+      [
+        ...new Set([
+          ...transfers.jobs.flatMap((j) => (j.dstHost ? [j.host, j.dstHost] : [j.host])),
+          ...edits.edits.map((e) => e.host),
+        ]),
+      ].sort(),
     [transfers.jobs, edits.edits],
   );
   const [selectedId, setSelectedId] = useState<number | null>(null);

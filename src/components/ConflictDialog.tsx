@@ -15,7 +15,7 @@ export function ConflictDialog({ request, protection, onAnswer }: Props) {
   const [applyToAll, setApplyToAll] = useState(false);
   const [typed, setTyped] = useState("");
   const canOverwrite = confirmationMatches(protection, typed);
-  const where = request.direction === "upload" ? `su ${request.host}` : "in locale";
+  const where = request.direction === "download" ? "in locale" : `su ${request.host}`;
   const newer =
     request.srcModified !== null && request.dstModified !== null
       ? request.srcModified > request.dstModified

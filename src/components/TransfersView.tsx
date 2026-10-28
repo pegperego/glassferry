@@ -21,7 +21,7 @@ interface Props {
 }
 
 export function TransfersView({ transfers, host, hostColor }: Props) {
-  const jobs = host ? transfers.jobs.filter((j) => j.host === host) : transfers.jobs;
+  const jobs = host ? transfers.jobs.filter((j) => j.host === host || j.dstHost === host) : transfers.jobs;
   if (transfers.jobs.length === 0) {
     return (
       <p className="transfers-empty muted">
@@ -33,13 +33,32 @@ export function TransfersView({ transfers, host, hostColor }: Props) {
   return (
     <div className="transfers">
       {[...jobs].reverse().map((job) => (
-        <TransferRow key={job.id} job={job} color={hostColor(job.host)} onCancel={() => transfers.cancel(job.id)} />
+        <TransferRow
+          key={job.id}
+          job={job}
+          color={hostColor(job.host)}
+          dstColor={job.dstHost ? hostColor(job.dstHost) : undefined}
+          onCancel={() => transfers.cancel(job.id)}
+        />
       ))}
     </div>
   );
 }
 
-function TransferRow({ job, color, onCancel }: { job: JobInfo; color: string | undefined; onCancel: () => void }) {
+const DIRECTION: Record<JobInfo["direction"], { icon: string; title: string }> = {
+  upload: { icon: "↑", title: "Upload" },
+  download: { icon: "↓", title: "Download" },
+  remote: { icon: "⇄", title: "Copia tra pannelli remoti" },
+};
+
+interface RowProps {
+  job: JobInfo;
+  color: string | undefined;
+  dstColor: string | undefined;
+  onCancel: () => void;
+}
+
+function TransferRow({ job, color, dstColor, onCancel }: RowProps) {
   const [showErrors, setShowErrors] = useState(false);
   const finished = isFinished(job);
   const percent = job.totalBytes > 0 ? Math.min(100, (job.doneBytes / job.totalBytes) * 100) : finished ? 100 : 0;
@@ -49,8 +68,8 @@ function TransferRow({ job, color, onCancel }: { job: JobInfo; color: string | u
 
   return (
     <div className={`transfer ${job.state}`}>
-      <span className="transfer-dir" title={job.direction === "upload" ? "Upload" : "Download"}>
-        {job.direction === "upload" ? "↑" : "↓"}
+      <span className="transfer-dir" title={DIRECTION[job.direction].title}>
+        {DIRECTION[job.direction].icon}
       </span>
       <div className="transfer-main">
         <div className="transfer-title">
@@ -59,8 +78,15 @@ function TransferRow({ job, color, onCancel }: { job: JobInfo; color: string | u
             <span className="category-dot" style={{ background: color ?? "var(--muted)" }} />
             {job.host}
           </span>
+          {job.dstHost && (
+            <span className="host-chip">
+              →
+              <span className="category-dot" style={{ background: dstColor ?? "var(--muted)" }} />
+              {job.dstHost}
+            </span>
+          )}
           <span className="muted" title={`${job.srcDir} → ${job.dstDir}`}>
-            {job.direction === "upload" ? `${job.srcDir} → ${job.dstDir}` : `${job.srcDir} → ${job.dstDir} (locale)`}
+            {job.direction === "download" ? `${job.srcDir} → ${job.dstDir} (locale)` : `${job.srcDir} → ${job.dstDir}`}
           </span>
         </div>
         <div className="progress">

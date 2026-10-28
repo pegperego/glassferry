@@ -1,6 +1,6 @@
 # Gestione connessioni e più pannelli remoti
 
-Analisi del 2026-10-27. Stato: fasi 1, 2 e 3 implementate, fase 4 da fare. Voci collegate in [`roadmap.md`](roadmap.md).
+Analisi del 2026-10-27. Stato: tutte e quattro le fasi implementate. Voci collegate in [`roadmap.md`](roadmap.md).
 
 ## Obiettivi
 
@@ -125,6 +125,8 @@ affiancati                                 impilati
 |---|---|---|
 | Remoto A → remoto B (server diversi) | Streaming via Mac: lettura da A e scrittura su B in pipeline, senza file su disco | Non previsto: copia, poi eliminazione esplicita |
 | Stessa connessione, due cartelle | `cp -a` via shell; altrimenti estensione `copy-data` se il server la offre; altrimenti streaming via Mac | `rename` SFTP, `mv` come fallback (come "Sposta in…") |
+
+Nota dall'implementazione: sulla stessa connessione la prima scelta è l'estensione `copy-data`, non `cp -a`. Copia sul server file per file, funziona anche sugli account solo SFTP (OpenSSH ≥ 9.0) e non apre un canale shell per ogni file. Se manca si usa `cp -p` via shell, e in ultima istanza lo streaming. La copia di una cartella su sé stessa o dentro sé stessa viene rifiutata.
 
 Lo streaming riusa il motore attuale: il job diventa sorgente → destinazione, con `.sfm-part`, conflitti, mtime, progresso e annullamento. Il trascinamento tra due remoti copia; spostare tra server diversi resta fuori, perché unisce due operazioni distruttive.
 

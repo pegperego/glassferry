@@ -258,7 +258,9 @@ fn log_open_dir(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<()>
         .map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// `dst_session_id`: destination of a remote → remote copy (`direction: "remote"`).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn transfer_start(
     state: State<'_, AppState>,
     session_id: u64,
@@ -266,11 +268,22 @@ fn transfer_start(
     src_dir: String,
     names: Vec<String>,
     dst_dir: String,
+    dst_session_id: Option<u64>,
 ) -> Result<u64> {
     let session = state.session(session_id)?;
+    let dst = match (direction, dst_session_id) {
+        (Direction::Remote, Some(id)) => {
+            if id == session_id {
+                transfer::check_same_session_copy(&src_dir, &names, &dst_dir)?;
+            }
+            Some((id, state.session(id)?))
+        }
+        (Direction::Remote, None) => return Err(AppError::Other("manca la sessione di destinazione".into())),
+        _ => None,
+    };
     Ok(state
         .transfers
-        .start(session_id, session, direction, src_dir, names, dst_dir))
+        .start(session_id, session, direction, src_dir, names, dst_dir, dst))
 }
 
 #[tauri::command]

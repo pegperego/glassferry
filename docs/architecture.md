@@ -115,7 +115,19 @@ Le operazioni distruttive passano da un piano (`plan.rs`): il backend decide com
 
 **Perché.** Un'anteprima costruita dal frontend potrebbe divergere da quello che fa il backend. Con il piano, l'anteprima non può mostrare una cosa diversa da quella eseguita. Per l'eliminazione via SFTP vale anche il contrario: i file comparsi dopo l'anteprima non vengono eliminati, perché la `rmdir` della loro cartella fallisce (verificato sul server di test).
 
-## 12. Distribuzione
+## 12. Copie tra due pannelli remoti
+
+**Decisione.** Due strade diverse:
+- **Stessa connessione:** copia sul server, con l'estensione SFTP `copy-data` se c'è, altrimenti con `cp -p` via shell.
+- **Server diversi:** streaming attraverso l'app, con letture e scritture in pipeline e nessun file temporaneo sul disco locale.
+
+**Perché.** Sulla stessa connessione far passare i dati dal Mac sarebbe un viaggio inutile. `copy-data` funziona anche senza shell e conserva l'avanzamento file per file. Tra server diversi non si può installare nulla, quindi l'unica strada è passare dal client, come `scp -3`.
+
+Lo spostamento tra server diversi non è previsto, perché unirebbe due operazioni distruttive: si copia, e poi si elimina a parte.
+
+**Verifica sul server di test.** 5 MiB in 5 file: copia identica (`diff -r`) con tutte e quattro le combinazioni (`copy-data`, `cp -p`, streaming sulla stessa sessione, streaming tra due sessioni), e il conflitto viene chiesto una volta sola.
+
+## 13. Distribuzione
 
 Fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh` e di leggere `~/.ssh`. Build firmata e notarizzata, arm64 e x64 (in roadmap).
 

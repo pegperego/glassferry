@@ -18,7 +18,15 @@ export interface Transfers {
   jobs: JobInfo[];
   activeCount: number;
   conflicts: ConflictRequest[];
-  start: (sessionId: number, direction: Direction, srcDir: string, names: string[], dstDir: string) => Promise<void>;
+  /** `dstSessionId`: destination of a remote → remote copy. */
+  start: (
+    sessionId: number,
+    direction: Direction,
+    srcDir: string,
+    names: string[],
+    dstDir: string,
+    dstSessionId?: number,
+  ) => Promise<void>;
   cancel: (jobId: number) => void;
   clearFinished: () => void;
   answerConflict: (action: ConflictAction, applyToAll: boolean) => void;
@@ -65,8 +73,8 @@ export function useTransfers(onFinished: (job: JobInfo) => void): Transfers {
   }, [apply]);
 
   const start = useCallback(
-    async (sessionId: number, direction: Direction, srcDir: string, names: string[], dstDir: string) => {
-      await transferStart(sessionId, direction, srcDir, names, dstDir);
+    async (sessionId: number, direction: Direction, srcDir: string, names: string[], dstDir: string, dstSessionId?: number) => {
+      await transferStart(sessionId, direction, srcDir, names, dstDir, dstSessionId ?? null);
     },
     [],
   );

@@ -104,8 +104,9 @@ export default function App() {
       if (within(current.localPane.path, job.dstDir)) void current.localPane.refresh();
       return;
     }
+    const target = job.direction === "remote" ? job.dstSessionId : job.sessionId;
     current.panes.forEach((pane, i) => {
-      if (sessionOf(current.slots[i])?.sessionId === job.sessionId && within(pane.path, job.dstDir)) void pane.refresh();
+      if (sessionOf(current.slots[i])?.sessionId === target && within(pane.path, job.dstDir)) void pane.refresh();
     });
   });
 
@@ -114,6 +115,16 @@ export default function App() {
     if (!session || names.length === 0) return;
     setLastRemote(slot);
     void transfers.start(session.sessionId, direction, srcDir, names, dstDir);
+    setPanelTab("transfers");
+    if (!panelOpen) setPanelOpen(true);
+  };
+
+  /** Copy between the two remote panes (server-side within one session, streamed otherwise). */
+  const startRemoteCopy = (from: number, to: number, srcDir: string, names: string[], dstDir: string) => {
+    const src = sessionOf(slots[from]);
+    const dst = sessionOf(slots[to]);
+    if (!src || !dst || names.length === 0) return;
+    transfers.start(src.sessionId, "remote", srcDir, names, dstDir, dst.sessionId).catch((e) => setAppError(String(e)));
     setPanelTab("transfers");
     if (!panelOpen) setPanelOpen(true);
   };
@@ -223,7 +234,9 @@ export default function App() {
   };
 
   const onDropToRemote = (slot: number) => (payload: DragPayload, targetDir: string) => {
-    if (payload.side === "local") startTransfer(slot, "upload", payload.dir, payload.names, targetDir);
+    const from = slotOf(payload.side);
+    if (from === null) startTransfer(slot, "upload", payload.dir, payload.names, targetDir);
+    else if (from !== slot) startRemoteCopy(from, slot, payload.dir, payload.names, targetDir);
   };
   const onDropToLocal = (payload: DragPayload, targetDir: string) => {
     const slot = slotOf(payload.side);
@@ -282,6 +295,10 @@ export default function App() {
     />
   );
 
+  /** The other remote pane is connected and both have a folder: remote copies possible. */
+  const otherReady = (slot: number) =>
+    slots[1 - slot].state === "connected" && panes[1 - slot].path !== null && panes[slot].path !== null;
+
   const remoteView = (slot: number): ReactElement => {
     const s = slots[slot];
     const pane: PaneState = panes[slot];
@@ -310,8 +327,18 @@ export default function App() {
           onDisconnect={() => void remote.close(slot)}
           onOpenInOther={() => openInOther(slot)}
           transfer={download}
-          transferTargets={download ? [{ label: "Scarica in locale", run: download.run }] : []}
-          acceptsFrom={["local"]}
+          transferTargets={[
+            ...(download ? [{ label: "Scarica in locale", run: download.run }] : []),
+            ...(otherReady(slot)
+              ? [
+                  {
+                    label: `Copia su ${paneName(1 - slot)}`,
+                    run: (names: string[]) => startRemoteCopy(slot, 1 - slot, pane.path!, names, panes[1 - slot].path!),
+                  },
+                ]
+              : []),
+          ]}
+          acceptsFrom={otherReady(slot) ? ["local", remoteSide(1 - slot)] : ["local"]}
           onDropFiles={onDropToRemote(slot)}
           openFile={{
             label: "Modifica",
@@ -483,7 +510,7 @@ export default function App() {
         <ConflictDialog
           key={transfers.conflicts[0].id}
           request={transfers.conflicts[0]}
-          protection={transfers.conflicts[0].direction === "upload" ? hostProtection(transfers.conflicts[0].host) : null}
+          protection={transfers.conflicts[0].direction !== "download" ? hostProtection(transfers.conflicts[0].host) : null}
           onAnswer={transfers.answerConflict}
         />
       )}

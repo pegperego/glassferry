@@ -153,13 +153,18 @@ export const logOpenDir = () => invoke<void>("log_open_dir");
 export const onLogBatch = (handler: (batch: LogEntry[]) => void): Promise<UnlistenFn> =>
   listen<LogEntry[]>("log-batch", (event) => handler(event.payload));
 
-export type Direction = "upload" | "download";
+/** `remote`: from one remote pane to another (same or different session). */
+export type Direction = "upload" | "download" | "remote";
 export type JobState = "scanning" | "running" | "waitingConflict" | "done" | "failed" | "cancelled";
 
 export interface JobInfo {
   id: number;
+  /** Remote side; the source of a remote copy. */
   sessionId: number;
   host: string;
+  /** Destination of a remote copy. */
+  dstSessionId: number | null;
+  dstHost: string | null;
   direction: Direction;
   srcDir: string;
   dstDir: string;
@@ -201,7 +206,8 @@ export const transferStart = (
   srcDir: string,
   names: string[],
   dstDir: string,
-) => invoke<number>("transfer_start", { sessionId, direction, srcDir, names, dstDir });
+  dstSessionId: number | null = null,
+) => invoke<number>("transfer_start", { sessionId, direction, srcDir, names, dstDir, dstSessionId });
 
 export const transferCancel = (jobId: number) => invoke<void>("transfer_cancel", { jobId });
 

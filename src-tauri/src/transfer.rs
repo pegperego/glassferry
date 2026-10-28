@@ -1,4 +1,11 @@
-//! Upload/download jobs between the local filesystem and an SFTP session.
+//! Upload/download jobs between the local filesystem and an SFTP session,
+//! and copies between two remote panes (`Direction::Remote`).
+//!
+//! A remote copy within one session is done on the server: the `copy-data`
+//! SFTP extension when available (OpenSSH >= 9.0, also on SFTP-only
+//! accounts), else `cp -p` through the shell. Between two sessions (or when
+//! neither is available) the data streams through this machine, pipelined
+//! on both sides, without touching the local disk.
 //!
 //! A job copies a selection of entries from one directory to another,
 //! recursively. Files are written to a `.sfm-part` temporary and renamed into
@@ -44,6 +51,19 @@ const MAX_REPORTED_ERRORS: usize = 50;
 pub enum Direction {
     Upload,
     Download,
+    /// From one remote pane to another (same or different session).
+    Remote,
+}
+
+/// How a remote → remote file copy is carried out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyStrategy {
+    /// SFTP `copy-data` extension, on the server.
+    CopyData,
+    /// `cp -p` through an exec channel, on the server.
+    Shell,
+    /// Read from the source session, write to the destination session.
+    Stream,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -61,8 +81,12 @@ pub enum JobState {
 #[serde(rename_all = "camelCase")]
 pub struct JobInfo {
     pub id: u64,
+    /// Remote side (source for remote copies).
     pub session_id: u64,
     pub host: String,
+    /// Destination of a remote copy.
+    pub dst_session_id: Option<u64>,
+    pub dst_host: Option<String>,
     pub direction: Direction,
     pub src_dir: String,
     pub dst_dir: String,
@@ -125,7 +149,10 @@ type Sink = Arc<dyn Fn(TransferEvent) + Send + Sync>;
 type ConflictReply = oneshot::Sender<(ConflictAction, bool)>;
 
 struct Job {
+    /// Remote side; the source of a remote copy.
     session: Arc<Session>,
+    /// Destination of a remote copy (may be the same session).
+    dst_session: Option<Arc<Session>>,
     info: Mutex<JobInfo>,
     done_bytes: AtomicU64,
     cancelled: AtomicBool,
@@ -137,6 +164,15 @@ struct Job {
 }
 
 impl Job {
+    /// Session written to: the destination of uploads and remote copies.
+    fn target(&self) -> &Arc<Session> {
+        self.dst_session.as_ref().unwrap_or(&self.session)
+    }
+
+    fn copy_strategy(&self) -> CopyStrategy {
+        copy_strategy(&self.session, self.target())
+    }
+
     fn update(&self, f: impl FnOnce(&mut JobInfo)) {
         f(&mut self.info.lock().unwrap());
         self.dirty.store(true, Ordering::Relaxed);
@@ -271,7 +307,10 @@ impl TransferManager {
             .lock()
             .unwrap()
             .values()
-            .filter(|j| j.info.lock().unwrap().session_id == session_id)
+            .filter(|j| {
+                let info = j.info.lock().unwrap();
+                info.session_id == session_id || info.dst_session_id == Some(session_id)
+            })
             .map(|j| j.info.lock().unwrap().id)
             .collect();
         for id in ids {
@@ -285,6 +324,8 @@ impl TransferManager {
         }
     }
 
+    /// `dst`: destination session of a remote copy (`Direction::Remote`).
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         self: &Arc<Self>,
         session_id: u64,
@@ -293,12 +334,15 @@ impl TransferManager {
         src_dir: String,
         names: Vec<String>,
         dst_dir: String,
+        dst: Option<(u64, Arc<Session>)>,
     ) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let info = JobInfo {
             id,
             session_id,
             host: session.launcher.label.clone(),
+            dst_session_id: dst.as_ref().map(|(id, _)| *id),
+            dst_host: dst.as_ref().map(|(_, s)| s.launcher.label.clone()),
             direction,
             src_dir,
             dst_dir,
@@ -318,6 +362,7 @@ impl TransferManager {
         };
         let job = Arc::new(Job {
             session,
+            dst_session: dst.map(|(_, s)| s),
             info: Mutex::new(info),
             done_bytes: AtomicU64::new(0),
             cancelled: AtomicBool::new(false),
@@ -334,11 +379,13 @@ impl TransferManager {
     async fn run(self: Arc<Self>, job: Arc<Job>) {
         let (host, direction, label, src_dir, dst_dir, names) = {
             let info = job.info.lock().unwrap();
+            let dst = info.dst_host.as_ref().map(|h| format!("{h}:")).unwrap_or_default();
             let label = format!(
-                "{} {} {} → {}",
+                "{} {} {} → {dst}{}",
                 match info.direction {
                     Direction::Upload => "upload",
                     Direction::Download => "download",
+                    Direction::Remote => "copy",
                 },
                 describe_names(&info.names),
                 info.src_dir,
@@ -443,7 +490,7 @@ impl TransferManager {
                     .map_err(|e| AppError::Other(e.to_string()))
                     .and_then(|r| r)
             }
-            Direction::Download => scan_remote(job, src_dir, names).await,
+            Direction::Download | Direction::Remote => scan_remote(job, src_dir, names).await,
         };
         op.result(result, |plan| {
             Some(format!(
@@ -472,15 +519,16 @@ impl TransferManager {
                 op.equivalent(format!("mkdir {}", shell_line([&path])));
                 op.result(tokio::fs::create_dir(&path).await.map_err(AppError::from), |_| None)
             }
-            Direction::Upload => {
-                let mut fs = job.session.sftp.fs();
+            Direction::Upload | Direction::Remote => {
+                let session = job.target();
+                let mut fs = session.sftp.fs();
                 match fs.metadata(path).await {
                     Ok(meta) if meta.file_type().is_some_and(|t| t.is_dir()) => return Ok(()),
                     Ok(_) => return Err(AppError::Other("esiste già un file con lo stesso nome".into())),
                     Err(_) => {}
                 }
-                let mut op = self.logger.start(Some(&host), Channel::Sftp, "mkdir", path);
-                op.equivalent(job.session.launcher.sftp_equivalent("mkdir", &[path]));
+                let mut op = self.logger.start(Some(&session.launcher.label), Channel::Sftp, "mkdir", path);
+                op.equivalent(session.launcher.sftp_equivalent("mkdir", &[path]));
                 op.result(fs.create_dir(path).await.map_err(AppError::from), |_| None)
             }
         }
@@ -495,7 +543,7 @@ impl TransferManager {
                 let modified = m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs());
                 (m.is_dir(), m.len(), modified)
             }),
-            Direction::Upload => job.session.sftp.fs().metadata(dst).await.ok().map(|m| {
+            Direction::Upload | Direction::Remote => job.target().sftp.fs().metadata(dst).await.ok().map(|m| {
                 (
                     m.file_type().is_some_and(|t| t.is_dir()),
                     m.len().unwrap_or(0),
@@ -517,6 +565,11 @@ impl TransferManager {
         let (op_name, detail, equivalent) = match direction {
             Direction::Upload => ("upload", format!("{src} → {dst}"), job.session.launcher.sftp_equivalent("put", &[src, dst])),
             Direction::Download => ("download", format!("{src} → {dst}"), job.session.launcher.sftp_equivalent("get", &[src, dst])),
+            Direction::Remote => (
+                "copy",
+                format!("{src} → {}:{dst}", job.target().launcher.label),
+                copy_equivalent(job, src, dst),
+            ),
         };
         let mut op = self.logger.start(Some(&host), Channel::Sftp, op_name, detail);
         op.equivalent(equivalent);
@@ -524,6 +577,7 @@ impl TransferManager {
         let result = match direction {
             Direction::Download => download(job, src, Path::new(dst), file).await,
             Direction::Upload => upload(job, Path::new(src), dst, file).await,
+            Direction::Remote => remote_copy(job, src, dst, file).await,
         };
         job.running.lock().unwrap().retain(|r| r != &file.rel);
         let secs = started.elapsed().as_secs_f64();
@@ -560,11 +614,12 @@ impl TransferManager {
         (self.sink)(TransferEvent::Conflict(ConflictRequest {
             id,
             job_id,
-            host: job.session.launcher.label.clone(),
+            // The destination: that is where an overwrite happens.
+            host: job.target().launcher.label.clone(),
             direction,
             path: dst.to_string(),
             src: src.to_string(),
-            commands: overwrite_commands(&job.session, direction, src, dst),
+            commands: overwrite_commands(job, direction, src, dst),
             src_size: file.size,
             src_modified: file.modified,
             dst_size: Some(dst_size),
@@ -697,18 +752,34 @@ async fn scan_remote(job: &Job, src_dir: &str, names: &[String]) -> Result<Plan>
 // ---- data transfer -----------------------------------------------------------
 
 /// The requests of an overwrite: copy to `.sfm-part`, then replace.
-fn overwrite_commands(session: &Session, direction: Direction, src: &str, dst: &str) -> Vec<String> {
+fn overwrite_commands(job: &Job, direction: Direction, src: &str, dst: &str) -> Vec<String> {
     use crate::log::sftp_quote as q;
     let part = part_name(dst);
+    let replace = |lines: &mut Vec<String>| {
+        if job.target().sftp.support_posix_rename() {
+            lines.push(format!("sftp> rename {} {}   # posix-rename: sostituisce in un passo", q(&part), q(dst)));
+        } else {
+            lines.push(format!("sftp> rm {}", q(dst)));
+            lines.push(format!("sftp> rename {} {}", q(&part), q(dst)));
+        }
+    };
     match direction {
         Direction::Upload => {
             let mut lines = vec![format!("sftp> put {} {}", q(src), q(&part))];
-            if session.sftp.support_posix_rename() {
-                lines.push(format!("sftp> rename {} {}   # posix-rename: sostituisce in un passo", q(&part), q(dst)));
-            } else {
-                lines.push(format!("sftp> rm {}", q(dst)));
-                lines.push(format!("sftp> rename {} {}", q(&part), q(dst)));
-            }
+            replace(&mut lines);
+            lines
+        }
+        Direction::Remote => {
+            let (src_host, dst_host) = (&job.session.launcher.label, &job.target().launcher.label);
+            let mut lines = match job.copy_strategy() {
+                CopyStrategy::CopyData => vec![format!("sftp> cp {} {}   # copy-data: copia sul server", q(src), q(&part))],
+                CopyStrategy::Shell => vec![crate::session::sh_command(r#"cp -p -- "$1" "$2""#, &[src, &part])],
+                CopyStrategy::Stream => vec![
+                    format!("{src_host}: sftp> get {}   # letto in streaming", q(src)),
+                    format!("{dst_host}: sftp> put … {}   # scritto senza passare dal disco locale", q(&part)),
+                ],
+            };
+            replace(&mut lines);
             lines
         }
         Direction::Download => vec![
@@ -801,9 +872,24 @@ async fn download_to(job: &Job, src: &str, part: &Path) -> Result<u64> {
 
 async fn upload(job: &Job, src: &Path, dst: &str, file: &PlannedFile) -> Result<u64> {
     let part = part_name(dst);
-    let mut fs = job.session.sftp.fs();
-    let existed = fs.metadata(dst).await.is_ok();
-    match upload_to(job, src, &part).await {
+    let existed = job.session.sftp.fs().metadata(dst).await.is_ok();
+    let result = upload_to(job, src, &part).await;
+    finish_remote(&job.session, result, &part, dst, existed, file).await
+}
+
+/// Puts a completed `.sfm-part` in place on `session`: mtime, mode (new
+/// files only), then rename (posix-rename replaces in one step). On error
+/// the part file is removed.
+async fn finish_remote(
+    session: &Session,
+    copied: Result<u64>,
+    part: &str,
+    dst: &str,
+    existed: bool,
+    file: &PlannedFile,
+) -> Result<u64> {
+    let mut fs = session.sftp.fs();
+    match copied {
         Ok(bytes) => {
             let mut meta = MetaDataBuilder::new();
             if let Some(mtime) = file.modified.and_then(|s| u32::try_from(s).ok()).and_then(UnixTimeStamp::from_raw) {
@@ -812,21 +898,148 @@ async fn upload(job: &Job, src: &Path, dst: &str, file: &PlannedFile) -> Result<
             if let (false, Some(mode)) = (existed, file.permissions) {
                 meta.permissions(Permissions::from_raw(RawPermissions::from_bits_truncate(mode)));
             }
-            let _ = fs.set_metadata(&part, meta.create()).await;
-            if existed && !job.session.sftp.support_posix_rename() {
+            let _ = fs.set_metadata(part, meta.create()).await;
+            if existed && !session.sftp.support_posix_rename() {
                 fs.remove_file(dst).await?;
             }
-            if let Err(e) = fs.rename(&part, dst).await {
-                let _ = fs.remove_file(&part).await;
+            if let Err(e) = fs.rename(part, dst).await {
+                let _ = fs.remove_file(part).await;
                 return Err(e.into());
             }
             Ok(bytes)
         }
         Err(e) => {
-            let _ = fs.remove_file(&part).await;
+            let _ = fs.remove_file(part).await;
             Err(e)
         }
     }
+}
+
+/// Within one session: refuses copying onto itself or into its own subtree.
+pub fn check_same_session_copy(src_dir: &str, names: &[String], dst_dir: &str) -> Result<()> {
+    let trim = |p: &str| p.trim_end_matches('/').to_string();
+    if trim(src_dir) == trim(dst_dir) {
+        return Err(AppError::Other("origine e destinazione sono la stessa cartella".into()));
+    }
+    for name in names {
+        let src = join(&trim(src_dir), name);
+        if trim(dst_dir) == src || trim(dst_dir).starts_with(&format!("{src}/")) {
+            return Err(AppError::Other(format!("impossibile copiare {src} dentro sé stessa")));
+        }
+    }
+    Ok(())
+}
+
+pub fn copy_strategy(src: &Arc<Session>, dst: &Arc<Session>) -> CopyStrategy {
+    if !Arc::ptr_eq(src, dst) {
+        CopyStrategy::Stream
+    } else {
+        // Test hook: `SFM_COPY_STRATEGY=shell|stream` exercises the fallbacks
+        // on a server that has copy-data.
+        let forced = std::env::var("SFM_COPY_STRATEGY").unwrap_or_default();
+        let has_cp = src.capabilities.commands.iter().any(|c| c == "cp");
+        if src.sftp.support_copy() && forced.is_empty() {
+            CopyStrategy::CopyData
+        } else if has_cp && forced != "stream" {
+            CopyStrategy::Shell
+        } else {
+            CopyStrategy::Stream
+        }
+    }
+}
+
+/// Terminal equivalent of a remote copy.
+fn copy_equivalent(job: &Job, src: &str, dst: &str) -> String {
+    match job.copy_strategy() {
+        CopyStrategy::CopyData => job.session.launcher.sftp_equivalent("cp", &[src, dst]),
+        CopyStrategy::Shell => crate::session::sh_command(r#"cp -p -- "$1" "$2""#, &[src, dst]),
+        CopyStrategy::Stream => shell_line([
+            "scp".to_string(),
+            "-3".into(),
+            format!("{}:{src}", job.session.launcher.alias),
+            format!("{}:{dst}", job.target().launcher.alias),
+        ]),
+    }
+}
+
+async fn remote_copy(job: &Job, src: &str, dst: &str, file: &PlannedFile) -> Result<u64> {
+    let target = job.target();
+    let part = part_name(dst);
+    let existed = target.sftp.fs().metadata(dst).await.is_ok();
+    let copied = match job.copy_strategy() {
+        CopyStrategy::CopyData => copy_data(job, src, &part).await,
+        CopyStrategy::Shell => copy_shell(job, src, &part).await,
+        CopyStrategy::Stream => relay_to(job, src, &part).await,
+    };
+    finish_remote(target, copied, &part, dst, existed, file).await
+}
+
+/// One `copy-data` request: the server copies the whole file.
+async fn copy_data(job: &Job, src: &str, part: &str) -> Result<u64> {
+    let sftp = &job.session.sftp;
+    let mut from = sftp.open(src).await?;
+    let mut to = sftp.options().write(true).create(true).truncate(true).open(part).await?;
+    from.copy_all_to(&mut to).await?;
+    to.close().await?;
+    let size = sftp.fs().metadata(part).await?.len().unwrap_or(0);
+    job.add_bytes(size);
+    Ok(size)
+}
+
+async fn copy_shell(job: &Job, src: &str, part: &str) -> Result<u64> {
+    let command = crate::session::sh_command(r#"cp -p -- "$1" "$2""#, &[src, part]);
+    let output = job.session.launcher.exec("cp", &command).await?;
+    if !output.status.success() {
+        return Err(AppError::Other(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
+    let size = job.session.sftp.fs().metadata(part).await?.len().unwrap_or(0);
+    job.add_bytes(size);
+    Ok(size)
+}
+
+/// Streams `src` (source session) into `part` (destination session):
+/// reads and writes both keep `REQUESTS_IN_FLIGHT` requests going, and at
+/// most that many chunks are held in memory.
+async fn relay_to(job: &Job, src: &str, part: &str) -> Result<u64> {
+    let input = job.session.sftp.open(src).await?;
+    let output = job.target().sftp.options().write(true).create(true).truncate(true).open(part).await?;
+    let chunk = CHUNK_LEN;
+    let (mut read_offset, mut write_offset, mut written) = (0u64, 0u64, 0u64);
+    let mut eof = false;
+    let mut reads = FuturesOrdered::new();
+    let mut writes = FuturesUnordered::new();
+    loop {
+        while !eof && reads.len() < REQUESTS_IN_FLIGHT {
+            reads.push_back(read_at(input.clone(), read_offset, chunk));
+            read_offset += chunk as u64;
+        }
+        while writes.len() >= REQUESTS_IN_FLIGHT {
+            let Some(n) = writes.next().await else { break };
+            let n: u64 = n?;
+            written += n;
+            job.add_bytes(n);
+        }
+        let Some(data) = reads.next().await else { break };
+        let data = data?;
+        job.check_cancelled()?;
+        let len = data.len();
+        if len > 0 {
+            writes.push(write_at(output.clone(), write_offset, data.freeze()));
+            write_offset += len as u64;
+        }
+        if len < chunk as usize {
+            eof = true;
+            reads = FuturesOrdered::new();
+        }
+    }
+    while let Some(n) = writes.next().await {
+        let n = n?;
+        written += n;
+        job.add_bytes(n);
+    }
+    output.close().await?;
+    drop(input);
+    Ok(written)
 }
 
 async fn upload_to(job: &Job, src: &Path, part: &str) -> Result<u64> {
@@ -940,6 +1153,15 @@ mod tests {
         assert_eq!(files, vec![("top/a.txt", 2), ("top/sub/b.txt", 3), ("single.txt", 1)]);
         assert_eq!(plan.skipped, vec!["top/sub/loop"]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_copies_onto_themselves() {
+        let names = vec!["tree".to_string()];
+        assert!(check_same_session_copy("/a", &names, "/a/").is_err());
+        assert!(check_same_session_copy("/a", &names, "/a/tree/sub").is_err());
+        assert!(check_same_session_copy("/a", &names, "/a/treeish").is_ok());
+        assert!(check_same_session_copy("/a", &names, "/b").is_ok());
     }
 
     #[test]

@@ -31,9 +31,11 @@ Diagnostic mode per connection (UI toggle, stored in localStorage) passes `verbo
 
 `transfer.rs` (`TransferManager`): a job copies a selection between a local and a remote directory, recursively (symlinks to directories are not followed). Files go to `<name>.sfm-part` and are renamed into place (remote rename uses posix-rename when available); mtime is preserved, permissions only for new files. Each file keeps 16 requests of 256 KiB in flight (`File` clones with `start_seek`); at most 3 files run at once across all jobs. Conflicts are asked one at a time per job (`transfer-conflict` event, answered with `transfer_conflict_respond`, optional apply-to-all). Progress goes to the UI as `transfer-update` every 200 ms. Every scan, mkdir, file and job is logged.
 
+Remote → remote copies (`Direction::Remote`, `transfer_start(..., dstSessionId)`): within one session the server copies (`copy-data` SFTP extension when `support_copy()`, else `cp -p` through the shell), between two sessions the data streams through the app (`relay_to`: reads and writes both pipelined, no local file). Copying onto itself or into its own subtree within one session is refused (`check_same_session_copy`). Conflicts, `.sfm-part`, mtime and progress work as for uploads; the conflict's `host` is the destination. Check: `cargo run --release --example remote_copy -- "$PWD/../.dev-sshd/ssh" segreta <work-dir>` (`SFM_COPY_STRATEGY=shell|stream` forces the fallbacks, test hook).
+
 Benchmark with latency: `scripts/test-sshd.sh start`, then `BIG_MB=50 cargo run --release --example transfer -- "$PWD/../.dev-sshd/ssh" sfm-slow segreta <work-dir>` (`sfm-slow` adds 20 ms each way through `scripts/delay-relay.py`). Reference: ~17 MiB/s pipelined vs ~5 MiB/s sequential; OpenSSH `sftp` ~22 MiB/s on the same path.
 
-UI triggers: button Carica/Scarica and F5 in the active pane (from the local pane: the remote pane used last; ⇧F5 and the context menu list every destination), drag & drop between panes (onto a folder row = into that folder; remote → remote is refused until phase 4 of `docs/connections.md`), files dropped from the Finder on a remote pane (Tauri `onDragDropEvent`, pane found through `data-pane`). Progress is shown in the bottom panel's Trasferimenti tab, with the host's category color and a host filter.
+UI triggers: button Carica/Scarica and F5 in the active pane (from the local pane: the remote pane used last; ⇧F5 and the context menu list every destination), drag & drop between any two panes (onto a folder row = into that folder; between remote panes it copies, never moves; ⇧F5 in a remote pane offers "Copia su <altro>"), files dropped from the Finder on a remote pane (Tauri `onDragDropEvent`, pane found through `data-pane`). Progress is shown in the bottom panel's Trasferimenti tab, with the host's category color and a host filter.
 
 ## Panes
 
@@ -65,7 +67,7 @@ Backend (`src-tauri/src/`):
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
 - `transfer.rs`, `fileops.rs`, `edit.rs`, `plan.rs` — see the sections above
-- `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `fileops.rs`, `edit.rs`, `connections.rs` (`-F`, ProxyJump between app connections, `ssh -G` errors, keychain round trip: `cargo run --example connections -- "$PWD/../.dev-sshd" segreta <work-dir>`)
+- `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `remote_copy.rs`, `fileops.rs`, `edit.rs`, `connections.rs` (`-F`, ProxyJump between app connections, `ssh -G` errors, keychain round trip: `cargo run --example connections -- "$PWD/../.dev-sshd" segreta <work-dir>`)
 
 Frontend (`src/`):
 - `api.ts` — typed wrappers for every Tauri command/event (keep in sync with `lib.rs`)
@@ -81,7 +83,7 @@ Frontend (`src/`):
 
 Other:
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `sfm-local`, `sfm-sftponly`, `sfm-rc`, `sfm-slow`); `scripts/delay-relay.py` adds latency for `sfm-slow`
-- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (phases 1–3 done, 4 to implement)
+- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/connections.md` — design of connection management and multiple remote panes (all four phases implemented)
 
 ## Commands
 

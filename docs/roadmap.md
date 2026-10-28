@@ -86,3 +86,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Salvataggio dei file modificati con temporaneo + posix-rename, scrittura diretta solo quando la sostituzione perderebbe link, proprietario o gruppo | `0264fff` |
 | Conflitti di modifica nello stesso secondo rilevati anche senza `sha256sum` (hash del file riletto via SFTP) | `1ed8583` |
 | Ripresa dei trasferimenti interrotti (annullati, connessione caduta, app chiusa) dal punto raggiunto | `5d8b178` |
+| Schermata Impostazioni (⌘,) e binario `ssh` configurabile | `01f4253` |

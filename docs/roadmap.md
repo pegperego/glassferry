@@ -26,9 +26,9 @@ Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in an
 | Scegliere l'app di modifica per tipo di file | proposta | 2026-10-27 | Oggi si usa sempre l'app predefinita del sistema |
 | Segnalibri per host e cartella | proposta | 2026-10-27 | |
 | Gestione connessioni: elenco interno (importate da `~/.ssh/config` o configurate nell'app), categorie con colore, password nel Portachiavi, toolbar con ⌘K e modale di gestione | fatto | 2026-10-27 | [`connections.md`](connections.md), fase 1 (`0bc1986`) |
-| Fino a 2 connessioni in pannelli affiancati o impilati, drag & drop tra tutti i pannelli | in corso | 2026-10-27 | [`connections.md`](connections.md), fase 2: implementata (anche i divisori ridimensionabili), da provare nell'app |
-| Conferme rinforzate per le categorie protette, con anteprima dei comandi | in corso | 2026-10-27 | [`connections.md`](connections.md), fase 3: implementata, da provare nell'app |
-| Trasferimenti da remoto a remoto (`copy-data`/`cp -p` sulla stessa connessione, streaming via Mac tra server diversi) | in corso | 2026-10-27 | [`connections.md`](connections.md), fase 4: implementata, da provare nell'app; assorbe "Copia lato server tra cartelle remote" |
+| Fino a 2 connessioni in pannelli affiancati o impilati, drag & drop tra tutti i pannelli | fatto | 2026-10-27 | [`connections.md`](connections.md), fase 2 (`a4314ff`, drag & drop nella finestra nativa `d6b6c99`) |
+| Conferme rinforzate per le categorie protette, con anteprima dei comandi | fatto | 2026-10-27 | [`connections.md`](connections.md), fase 3 (`ebdab76`) |
+| Trasferimenti da remoto a remoto (`copy-data`/`cp -p` sulla stessa connessione, streaming via Mac tra server diversi) | fatto | 2026-10-27 | [`connections.md`](connections.md), fase 4 (`70a6104`); assorbe "Copia lato server tra cartelle remote" |
 | Impostazione del binario `ssh` | proposta | 2026-10-27 | Default `/usr/bin/ssh`; serve per chi usa l'ssh di Homebrew |
 | Trascinare file dall'app al Finder | proposta | 2026-10-27 | Non supportato da Tauri: serve un plugin e, per i remoti, le file promise di macOS |
 | Interfaccia in inglese | proposta | 2026-10-27 | Oggi i testi sono solo in italiano |
@@ -63,4 +63,10 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Operazioni sui file: nuova cartella, rinomina, sposta, elimina | `737d0ce` |
 | Modifica dei file remoti con l'app predefinita | `c89eb90` |
 | Gestione connessioni (fase 1 di `connections.md`) | `0bc1986` |
+| Fino a due pannelli remoti, affiancati o impilati (fase 2) | `a4314ff`, `d6b6c99` |
+| Operazioni con anteprima e conferme per le connessioni protette (fase 3) | `ebdab76` |
+| Copie da remoto a remoto (fase 4) | `70a6104` |
+| Pannelli a schede con il colore della categoria | `6a99817` |
+| Nuovo nome Glassferry e nuova icona | `bd93ad1` |
+| Fasi 2–4 provate nell'app (2026-10-28) | — |
 | Prova sul campo con i server reali: esito positivo (2026-10-27) | — |

@@ -88,7 +88,7 @@ export function ConnectionManager(props: Props) {
   const exportFile = () =>
     run(async () => {
       const path = await saveDialog({
-        defaultPath: "connessioni-sshfilemanager.json",
+        defaultPath: "connessioni-glassferry.json",
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
       if (!path) return;

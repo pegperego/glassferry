@@ -1,4 +1,6 @@
 :root {
+  /* Native scrollbars and form controls follow the theme. */
+  color-scheme: light dark;
   --bg: #ffffff;
   --bg-alt: #f4f4f6;
   --fg: #1d1d1f;
@@ -105,6 +107,8 @@ kbd {
   display: flex;
   min-width: 0;
   min-height: 0;
+  padding: 6px;
+  background: var(--bg-alt);
 }
 
 /* SplitView: panes with draggable dividers */
@@ -135,33 +139,24 @@ kbd {
   flex: 1;
 }
 
+/* The gap between the pane cards is the divider. */
 .splitter {
   flex: none;
-  background: var(--border);
+  border-radius: 3px;
 }
 
 .split-row > .splitter {
-  width: 1px;
+  width: 6px;
   cursor: col-resize;
-  /* Wider hit area than the visible line. */
-  box-shadow: 0 0 0 2px transparent;
-  padding: 0 2px;
-  margin: 0 -2px;
-  background-clip: content-box;
-  z-index: 1;
 }
 
 .split-column > .splitter {
-  height: 1px;
+  height: 6px;
   cursor: row-resize;
-  padding: 2px 0;
-  margin: -2px 0;
-  background-clip: content-box;
-  z-index: 1;
 }
 
 .splitter:hover {
-  background-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 body.resizing {
@@ -172,30 +167,42 @@ body.resizing * {
   cursor: inherit !important;
 }
 
+/*
+ * Panes are cards on the window background. The local pane is neutral;
+ * remote panes take their category color for the whole border and a light
+ * tint of it as background (color-mix: also right in the dark theme).
+ * The active pane gets a thicker border and a stronger header.
+ */
 .pane {
+  --pane-border: var(--border);
+  --pane-bg: var(--bg);
+  --pane-head: var(--bg-alt);
+  --pane-line: var(--border);
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   container-type: inline-size;
-  border-top: 2px solid transparent;
-}
-
-.pane + .pane {
-  border-left: 1px solid var(--border);
+  border: 2px solid var(--pane-border);
+  border-radius: 7px;
+  background: var(--pane-bg);
+  overflow: hidden;
 }
 
 .pane.active {
-  border-top-color: var(--accent);
+  --pane-border: var(--accent);
+  box-shadow: 0 0 0 1px var(--pane-border);
 }
 
-/* Remote panes always show their category color; thicker when active. */
 .pane.colored {
-  border-top: 3px solid var(--pane-color);
+  --pane-border: var(--pane-color);
+  --pane-bg: color-mix(in srgb, var(--pane-color) 6%, var(--bg));
+  --pane-head: color-mix(in srgb, var(--pane-color) 14%, var(--bg));
+  --pane-line: color-mix(in srgb, var(--pane-color) 30%, var(--border));
 }
 
 .pane.colored.active {
-  box-shadow: inset 0 3px 0 var(--pane-color);
+  --pane-head: color-mix(in srgb, var(--pane-color) 24%, var(--bg));
 }
 
 .remote-title {
@@ -208,6 +215,7 @@ body.resizing * {
   align-items: center;
   justify-content: center;
   color: var(--muted);
+  border-style: dashed;
 }
 
 .pane-header {
@@ -215,7 +223,8 @@ body.resizing * {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--pane-line);
+  background: var(--pane-head);
 }
 
 .pane-title {
@@ -255,7 +264,7 @@ body.resizing * {
   padding: 3px 8px;
   color: var(--muted);
   font-size: 11px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--pane-line);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -265,7 +274,7 @@ body.resizing * {
   padding: 3px 8px;
   color: var(--muted);
   font-size: 11px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--pane-line);
 }
 
 .file-list {
@@ -304,7 +313,7 @@ body.resizing * {
 }
 
 .file-head {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--pane-line);
   color: var(--muted);
   height: 24px;
 }

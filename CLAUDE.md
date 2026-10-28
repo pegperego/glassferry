@@ -39,7 +39,7 @@ UI triggers: button Carica/Scarica and F5 in the active pane (from the local pan
 
 ## Panes
 
-The local pane is always on the left; on the right up to two remote panes (slots `r0`, `r1`, see `dnd.ts` `Side`), managed by `useRemoteSlots.ts`. Opening a connection uses a free slot, otherwise a dialog asks which one to replace. The same connection in both slots shares one session (no new connect; "⧉ Apri nell'altro pannello" opens the current folder there); a session is disconnected only when no slot uses it. Layout toggle in the toolbar: remotes side by side or stacked (localStorage `layout.remotes`); dividers via `SplitView` (sizes in localStorage `split.*`, double click = equal parts). Window minimum 900×560.
+The local pane is always on the left; on the right up to two remote panes (slots `r0`, `r1`, see `dnd.ts` `Side`), managed by `useRemoteSlots.ts`. Opening a connection uses a free slot, otherwise a dialog asks which one to replace. The same connection in both slots shares one session (no new connect; "⧉ Apri nell'altro pannello" opens the current folder there); a session is disconnected only when no slot uses it. Layout toggle in the toolbar: remotes side by side or stacked (localStorage `layout.remotes`); dividers via `SplitView` (sizes in localStorage `split.*`, double click = equal parts). Window minimum 900×560. Panes are cards on the window background (6 px gaps, which are the dividers): the local pane is neutral, remote panes take the category color for the whole border and a `color-mix` tint for background (6%) and header (14%, 24% when active); the active pane has a thicker border. `color-scheme: light dark` keeps native scrollbars in theme.
 
 ## Previewed operations and protected connections
 

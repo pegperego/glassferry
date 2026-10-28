@@ -112,6 +112,6 @@ scripts/test-sshd.sh stop
 
 ## Roadmap
 
-`docs/roadmap.md` (Italian) tracks future work. When a new feature or improvement is proposed (by the user or as a suggestion at the end of a phase), add it there with the date and a short motivation; when one is done, move it to "Fatto" with the commit. Out-of-scope items for the MVP are listed there too.
+`docs/roadmap.md` (Italian) tracks future work, grouped in development waves (Wave 1 Affidabilità → Wave 4 Apertura al pubblico), each in priority order. When a new feature or improvement is proposed (by the user or as a suggestion at the end of a phase), add it there with the date and a short motivation, in the wave where it belongs or under "Da collocare" until the user decides; when one is done, move it to "Fatto" with the commit. Out-of-scope items for the MVP are listed there too.
 
 When a design decision is taken or changed, update `docs/architecture.md`.

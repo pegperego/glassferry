@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   settingsLoad,
   settingsSave,
@@ -8,6 +9,7 @@ import {
   type SshCheck,
   type TerminalApp,
   type TerminalSettings,
+  type EditorRule,
 } from "../api";
 
 const DEFAULT_SSH = "/usr/bin/ssh";
@@ -42,6 +44,8 @@ export function SettingsDialog({ onClose, onAbout }: Props) {
   const [terminal, setTerminal] = useState(AUTO);
   const [installed, setInstalled] = useState<TerminalApp[]>([]);
   const [command, setCommand] = useState("");
+  /** Editor rules as typed: extensions as one text ("conf, yml"). */
+  const [editors, setEditors] = useState<{ extensions: string; app: string }[]>([]);
   const [check, setCheck] = useState<{ path: string; result: SshCheck | string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +57,7 @@ export function SettingsDialog({ onClose, onAbout }: Props) {
         setSshBin(loaded.sshBin ?? "");
         setTerminal(terminalChoice(loaded.terminal, terminals));
         setCommand(loaded.terminal.command ?? "");
+        setEditors(loaded.editors.map((r) => ({ extensions: r.extensions.join(", "), app: r.app })));
       },
       (e) => setError(String(e)),
     );
@@ -74,7 +79,16 @@ export function SettingsDialog({ onClose, onAbout }: Props) {
       return;
     }
     setError(null);
-    settingsSave({ ...settings, sshBin: sshBin.trim() || null, terminal: terminalSettings(terminal, command) }).then(
+    const editorRules: EditorRule[] = editors.map((r) => ({
+      extensions: r.extensions.split(/[\s,]+/).filter(Boolean),
+      app: r.app,
+    }));
+    settingsSave({
+      ...settings,
+      sshBin: sshBin.trim() || null,
+      terminal: terminalSettings(terminal, command),
+      editors: editorRules,
+    }).then(
       onClose,
       (err) => setError(String(err)),
     );
@@ -148,6 +162,60 @@ export function SettingsDialog({ onClose, onAbout }: Props) {
               {terminal === CUSTOM &&
                 " Per un terminale non in elenco: il comando viene eseguito con sh e {script} è il percorso dello script da eseguire."}
             </p>
+          </section>
+        )}
+        {settings && (
+          <section>
+            <h3>Modifica dei file remoti</h3>
+            <p className="muted small">
+              Il doppio clic su un file remoto lo apre con l'app indicata per la sua estensione; gli altri file con l'app
+              predefinita del sistema.
+            </p>
+            {editors.map((rule, i) => {
+              const update = (patch: Partial<{ extensions: string; app: string }>) =>
+                setEditors(editors.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+              return (
+                <div className="field-row editor-rule" key={i}>
+                  <input
+                    className="mono"
+                    value={rule.extensions}
+                    placeholder="conf, yml, sh"
+                    aria-label="Estensioni"
+                    spellCheck={false}
+                    onChange={(e) => update({ extensions: e.target.value })}
+                  />
+                  <input
+                    value={rule.app}
+                    placeholder={IS_MAC ? "Visual Studio Code" : "code"}
+                    aria-label={IS_MAC ? "Applicazione" : "Comando"}
+                    spellCheck={false}
+                    onChange={(e) => update({ app: e.target.value })}
+                  />
+                  {IS_MAC && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void openDialog({
+                          defaultPath: "/Applications",
+                          filters: [{ name: "Applicazioni", extensions: ["app"] }],
+                        }).then((picked) => {
+                          // The path: `open -a` finds it wherever the app is installed.
+                          if (typeof picked === "string") update({ app: picked });
+                        })
+                      }
+                    >
+                      Scegli…
+                    </button>
+                  )}
+                  <button type="button" title="Togli la regola" onClick={() => setEditors(editors.filter((_, j) => j !== i))}>
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+            <button type="button" onClick={() => setEditors([...editors, { extensions: "", app: "" }])}>
+              + Aggiungi regola
+            </button>
           </section>
         )}
         {error && <p className="error-text small">{error}</p>}

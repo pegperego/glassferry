@@ -126,6 +126,15 @@ export interface Settings {
   /** Absolute path; null: /usr/bin/ssh. */
   sshBin: string | null;
   terminal: TerminalSettings;
+  /** Apps for editing remote files, by extension; other files use the system default. */
+  editors: EditorRule[];
+}
+
+export interface EditorRule {
+  /** Lowercase, without the dot. */
+  extensions: string[];
+  /** macOS: application name or path (`open -a`); Linux: a command. */
+  app: string;
 }
 
 /** A terminal the app knows, installed on this machine. */

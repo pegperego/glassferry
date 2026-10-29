@@ -20,6 +20,26 @@ pub struct Settings {
     pub ssh_bin: Option<String>,
     /// How "Apri nel terminale" opens the terminal.
     pub terminal: crate::terminal::TerminalSettings,
+    /// Apps for editing remote files, by extension; others use the system default.
+    pub editors: Vec<EditorRule>,
+}
+
+/// Remote files with one of these extensions open with `app`: on macOS an
+/// application (name or path, for `open -a`), on Linux a command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EditorRule {
+    /// Lowercase, without the dot.
+    pub extensions: Vec<String>,
+    pub app: String,
+}
+
+impl EditorRule {
+    /// The rule for `file_name`, if any (the first matching one).
+    pub fn find<'a>(rules: &'a [EditorRule], file_name: &str) -> Option<&'a EditorRule> {
+        let extension = Path::new(file_name).extension()?.to_str()?.to_lowercase();
+        rules.iter().find(|rule| rule.extensions.contains(&extension))
+    }
 }
 
 impl Settings {
@@ -31,6 +51,27 @@ impl Settings {
     pub fn normalized(mut self) -> Result<Self> {
         self.ssh_bin = self.ssh_bin.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
         self.terminal = self.terminal.normalized();
+        let mut editors = Vec::new();
+        for rule in self.editors {
+            let extensions: Vec<String> = rule
+                .extensions
+                .iter()
+                .map(|e| e.trim().trim_start_matches('.').to_lowercase())
+                .filter(|e| !e.is_empty())
+                .collect();
+            let app = rule.app.trim().to_string();
+            if extensions.is_empty() && app.is_empty() {
+                continue;
+            }
+            if extensions.is_empty() || app.is_empty() {
+                return Err(AppError::Other("ogni regola di modifica vuole estensioni e app".into()));
+            }
+            if let Some(bad) = extensions.iter().find(|e| e.contains(['.', '/', ' ', '*'])) {
+                return Err(AppError::Other(format!("estensione non valida: {bad}")));
+            }
+            editors.push(EditorRule { extensions, app });
+        }
+        self.editors = editors;
         if let Some(path) = &self.ssh_bin
             && !Path::new(path).is_absolute()
         {
@@ -132,6 +173,25 @@ mod tests {
         assert!(check.version.starts_with("OpenSSH_"), "{}", check.version);
         assert!(check_ssh(Path::new("/bin/false")).await.is_err());
         assert!(check_ssh(Path::new("/nonexistent/ssh")).await.is_err());
+    }
+
+    #[test]
+    fn normalizes_and_matches_editor_rules() {
+        let rule = |ext: &[&str], app: &str| EditorRule { extensions: ext.iter().map(|e| e.to_string()).collect(), app: app.into() };
+        let settings = Settings {
+            editors: vec![rule(&[" .Conf", "YML "], " Visual Studio Code "), rule(&[], "")],
+            ..Default::default()
+        }
+        .normalized()
+        .unwrap();
+        assert_eq!(settings.editors, vec![rule(&["conf", "yml"], "Visual Studio Code")]);
+        assert_eq!(EditorRule::find(&settings.editors, "nginx.CONF").map(|r| r.app.as_str()), Some("Visual Studio Code"));
+        assert!(EditorRule::find(&settings.editors, "notes.txt").is_none());
+        assert!(EditorRule::find(&settings.editors, "conf").is_none());
+        let bad = Settings { editors: vec![rule(&["tar.gz"], "x")], ..Default::default() };
+        assert!(bad.normalized().is_err());
+        let half = Settings { editors: vec![rule(&["conf"], " ")], ..Default::default() };
+        assert!(half.normalized().is_err());
     }
 
     #[test]

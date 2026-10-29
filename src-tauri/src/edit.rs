@@ -168,6 +168,8 @@ pub struct EditManager {
     edits: Mutex<HashMap<u64, Arc<Edit>>>,
     /// Off in headless tests: no editor window.
     launch_editor: AtomicBool,
+    /// Apps by extension (settings); other files open with the default app.
+    editors: Mutex<Vec<crate::settings::EditorRule>>,
 }
 
 impl EditManager {
@@ -181,6 +183,7 @@ impl EditManager {
             next_id: AtomicU64::new(1),
             edits: Mutex::new(HashMap::new()),
             launch_editor: AtomicBool::new(true),
+            editors: Mutex::new(Vec::new()),
         });
         manager.restore();
         manager
@@ -285,12 +288,30 @@ impl EditManager {
         self.launch_editor.store(launch, Ordering::Relaxed);
     }
 
+    pub fn set_editors(&self, rules: Vec<crate::settings::EditorRule>) {
+        *self.editors.lock().unwrap() = rules;
+    }
+
+    /// Opens the local copy with the app of its extension, or the default one.
     fn launch(&self, path: &str) -> Result<()> {
-        if self.launch_editor.load(Ordering::Relaxed) {
-            open_with_default_app(path)
-        } else {
-            Ok(())
+        if !self.launch_editor.load(Ordering::Relaxed) {
+            return Ok(());
         }
+        let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let app = crate::settings::EditorRule::find(&self.editors.lock().unwrap(), &name).map(|r| r.app.clone());
+        let mut command = open_command(path, app.as_deref());
+        let mut op = self.logger.start(None, Channel::Local, "open-editor", path);
+        op.equivalent(crate::log::shell_line(
+            std::iter::once(command.get_program()).chain(command.get_args()),
+        ));
+        let result = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| AppError::Other(format!("impossibile aprire il file: {e}")));
+        op.result(result, |_| Some(app.unwrap_or_else(|| "app predefinita".into())))
     }
 
     pub fn default_root() -> Option<PathBuf> {
@@ -915,16 +936,27 @@ async fn write_replacing(session: &Session, path: &str, part: &str, content: &[u
 
 // ---- helpers -------------------------------------------------------------------
 
-fn open_with_default_app(path: &str) -> Result<()> {
-    let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    std::process::Command::new(program)
-        .arg(path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| AppError::Other(format!("impossibile aprire il file: {e}")))
+/// macOS: `open [-a app] path`. Linux: `xdg-open path`, or the configured
+/// command with the path as its last argument (`sh -c`, so it can carry
+/// options, e.g. `code --new-window`).
+fn open_command(path: &str, app: Option<&str>) -> std::process::Command {
+    match app {
+        Some(app) if cfg!(target_os = "macos") => {
+            let mut command = std::process::Command::new("open");
+            command.args(["-a", app, path]);
+            command
+        }
+        Some(app) => {
+            let mut command = std::process::Command::new("/bin/sh");
+            command.args(["-c", &format!(r#"{app} "$1""#), "sh", path]);
+            command
+        }
+        None => {
+            let mut command = std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" });
+            command.arg(path);
+            command
+        }
+    }
 }
 
 /// Removes a copy with its private directory.

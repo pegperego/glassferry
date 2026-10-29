@@ -71,6 +71,8 @@ UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌥⌘T terminal, ⌘
 
 Conflict diff (`diff.rs` with the `similar` crate, command `edit_conflict_diff(id)`, `ConflictDiffView` in the conflict dialog — "Mostra le differenze" — and in "File aperti" — "Differenze" — for conflicts left pending): the server's current version against the local copy, hunks with 3 lines of context and line numbers on both sides; "server" lines are lost by overwriting. Not for binary files or over 2 MB. Only two versions: the opened one is kept as a hash, not its content.
 
+Editor per file type (`Settings.editors`, `EditorRule { extensions, app }`, section "Modifica dei file remoti" in Impostazioni): the first rule whose extensions include the file's opens the local copy (`EditManager::set_editors`, applied at start and on save): macOS `open -a <app or .app path>` (the picker stores the path), Linux the command with the path as last argument (`sh -c`); other files: `open`/`xdg-open`. Logged as `open-editor`. Local files still open with the system default.
+
 UI: double click / Enter on a remote file = edit, on a local file = open with the default app; the bottom panel's "File aperti" tab lists open files.
 
 ## Bookmarks

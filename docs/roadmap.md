@@ -20,11 +20,9 @@ Completata: sviluppo il 2026-10-28, correzioni dopo la prova e provata nell'app 
 
 ## Wave 3 — Strumenti lato server (0.4)
 
-Quasi tutte richiedono la shell: sugli account solo SFTP non sono disponibili.
+Ricerca e archivi usano la shell quando c'è (la ricerca ripiega su una visita SFTP, gli archivi no); diff e app di modifica funzionano ovunque.
 
-| Voce | Stato | Proposta il | Note |
-|---|---|---|---|
-| Scegliere l'app di modifica per tipo di file | proposta | 2026-10-27 | Oggi si usa sempre l'app predefinita del sistema |
+Sviluppo completato il 2026-10-29 (le voci sono in "Fatto"); da provare nell'app.
 
 ## Wave 4 — Apertura al pubblico (1.0)
 

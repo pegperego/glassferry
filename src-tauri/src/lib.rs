@@ -227,6 +227,7 @@ fn settings_save(state: State<'_, AppState>, settings: settings::Settings) -> Re
     let settings = settings.normalized()?;
     let op = state.logger.start(None, log::Channel::Local, "settings-save", state.settings_store.path().to_string_lossy());
     op.result(state.settings_store.save(&settings), |_| Some(format!("ssh: {}", settings.ssh_bin().display())))?;
+    state.edits.set_editors(settings.editors.clone());
     *state.settings.lock().unwrap() = settings.clone();
     Ok(settings)
 }
@@ -812,6 +813,7 @@ pub fn run() {
                     settings
                 }
             };
+            edits.set_editors(settings.editors.clone());
             app.manage(AppState {
                 settings_store,
                 settings: Mutex::new(settings),

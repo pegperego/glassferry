@@ -1815,3 +1815,16 @@ button.link {
   color: var(--ok);
   font-weight: 600;
 }
+
+.editor-rule {
+  margin-bottom: 6px;
+}
+
+.editor-rule input.mono {
+  flex: 0 0 34%;
+}
+
+.settings {
+  max-height: 88vh;
+  overflow: auto;
+}

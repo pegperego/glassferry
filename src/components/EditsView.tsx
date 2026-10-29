@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { EditInfo } from "../api";
 import { formatLogTime } from "../logStore";
 import type { Edits } from "../useEdits";
+import { ConflictDiffView } from "./ConflictDiffView";
 import { ConfirmDialog } from "./Dialogs";
 
 const STATE_LABEL: Record<EditInfo["state"], string> = {
@@ -23,6 +24,7 @@ interface Props {
 
 export function EditsView({ edits, host, hostColor, onReconnect }: Props) {
   const [closing, setClosing] = useState<EditInfo | null>(null);
+  const [diffOf, setDiffOf] = useState<EditInfo | null>(null);
   const shown = host ? edits.edits.filter((e) => e.host === host) : edits.edits;
   if (edits.edits.length === 0) {
     return (
@@ -62,6 +64,7 @@ export function EditsView({ edits, host, hostColor, onReconnect }: Props) {
           </div>
           {edit.state === "conflict" && (
             <>
+              <button onClick={() => setDiffOf(edit)}>Differenze</button>
               <button onClick={() => edits.resolve(edit.id, "overwrite")}>Sovrascrivi sul server</button>
               <button onClick={() => edits.resolve(edit.id, "reload")}>Usa versione del server</button>
             </>
@@ -85,6 +88,22 @@ export function EditsView({ edits, host, hostColor, onReconnect }: Props) {
           </button>
         </div>
       ))}
+      {diffOf && (
+        <div className="modal-backdrop">
+          <div className="modal conflict-modal wide" onKeyDown={(e) => e.key === "Escape" && setDiffOf(null)}>
+            <h2>Differenze con il server</h2>
+            <pre className="prompt">
+              {diffOf.host}:{diffOf.remotePath}
+            </pre>
+            <ConflictDiffView editId={diffOf.id} />
+            <div className="actions">
+              <button className="primary" autoFocus onClick={() => setDiffOf(null)}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {closing && (
         <ConfirmDialog
           title="Chiudere senza caricare?"

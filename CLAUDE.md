@@ -69,6 +69,8 @@ UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌥⌘T terminal, ⌘
 
 `edit.rs` (`EditManager`): `edit_open` downloads into `~/Library/Caches/glassferry/edit/<hash>/<name>` (max 100 MB), opens it with `open`/`xdg-open` and watches the directory with `notify` (editors save atomically). After a 500 ms debounce, a content change (SHA-256) is uploaded to `<name>.gf-part` with the file's mode and renamed over it with posix-rename (never partial); it is written in place instead (truncate + write, `write_replacing` returns the reason, logged) when the path is a symlink, the new file would get another owner or group, the server lacks posix-rename or the folder is not writable. Before uploading, the remote file is compared with the opened version: size and mtime, then, when those match (SFTP v3 mtime has 1 s resolution), the SHA-256 of its content (`remote_hash`: `sha256sum` when the probe found it, else the file read over SFTP, logged as `edit-check`): on mismatch an `edit-conflict` asks overwrite / reload (local copy kept as "<name> (mia versione)") / keep. Local changes are never dropped: on disconnect (`close_session`) and on exit (`close_unchanged`) only copies without local changes (content hash = last synced) are removed; the others are *detached* (state `detached`, `sessionId` null, no watcher) and reattached by `connect` for the same connection id (`attach`: new watcher, then a sync with the usual conflict check and confirmation). Open files are recorded in `<cache>/edit/edits.json` on every change, so detached copies come back after a restart or a crash. Sessions map to their connection id in `AppState.sessions` (`OpenSession`). The UI asks before closing a pane that would detach files (`guardClose` in `App.tsx`); detached rows offer "Riconnetti". Check: `cargo run --example edit -- "$PWD/../.dev-sshd/ssh" gf-local segreta <work-dir>` (and `gf-sftponly`).
 
+Conflict diff (`diff.rs` with the `similar` crate, command `edit_conflict_diff(id)`, `ConflictDiffView` in the conflict dialog — "Mostra le differenze" — and in "File aperti" — "Differenze" — for conflicts left pending): the server's current version against the local copy, hunks with 3 lines of context and line numbers on both sides; "server" lines are lost by overwriting. Not for binary files or over 2 MB. Only two versions: the opened one is kept as a hash, not its content.
+
 UI: double click / Enter on a remote file = edit, on a local file = open with the default app; the bottom panel's "File aperti" tab lists open files.
 
 ## Bookmarks
@@ -93,7 +95,7 @@ Backend (`src-tauri/src/`):
 - `ids.rs` — owner/group names (see File operations)
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
-- `transfer.rs`, `fileops.rs`, `attrs.rs`, `dirsize.rs`, `search.rs`, `archive.rs`, `edit.rs`, `plan.rs` — see the sections above
+- `transfer.rs`, `fileops.rs`, `attrs.rs`, `dirsize.rs`, `search.rs`, `archive.rs`, `edit.rs`, `diff.rs`, `plan.rs` — see the sections above
 - `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `remote_copy.rs`, `resume.rs`, `fileops.rs`, `edit.rs`, `connections.rs` (`-F`, ProxyJump between app connections, `ssh -G` errors, keychain round trip: `cargo run --example connections -- "$PWD/../.dev-sshd" segreta <work-dir>`)
 
 Frontend (`src/`):

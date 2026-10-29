@@ -434,6 +434,27 @@ export const editList = () => invoke<EditInfo[]>("edit_list");
 export const editClose = (id: number) => invoke<void>("edit_close", { id });
 export const editResolve = (id: number, choice: EditChoice) => invoke<void>("edit_resolve", { id, choice });
 export const editReopen = (id: number) => invoke<void>("edit_reopen", { id });
+
+export interface DiffLine {
+  /** "server": only on the server (lost by overwriting); "mine": only in the local copy. */
+  kind: "same" | "server" | "mine";
+  serverLine: number | null;
+  mineLine: number | null;
+  text: string;
+}
+
+export interface ConflictDiff {
+  hunks: DiffLine[][];
+  serverOnly: number;
+  mineOnly: number;
+  identical: boolean;
+  binary: boolean;
+  tooLarge: boolean;
+  truncated: boolean;
+}
+
+/** The server's current version against the local copy of an edit in conflict. */
+export const editConflictDiff = (id: number) => invoke<ConflictDiff>("edit_conflict_diff", { id });
 export const editReveal = (id: number) => invoke<void>("edit_reveal", { id });
 export const localOpen = (path: string) => invoke<void>("local_open", { path });
 

@@ -1759,3 +1759,59 @@ button.link {
 .search-result:hover {
   background: var(--bg-alt);
 }
+
+.conflict-modal.wide {
+  width: min(860px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.conflict-diff {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.diff-lines {
+  font-size: 12px;
+  overflow: auto;
+  max-height: 50vh;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.diff-hunk + .diff-hunk {
+  border-top: 1px dashed var(--border);
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 4ch 4ch 2ch 1fr;
+  white-space: pre;
+}
+
+.diff-num {
+  color: var(--muted);
+  text-align: right;
+  padding-right: 6px;
+  user-select: none;
+}
+
+.diff-line.server {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.diff-line.mine {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+.diff-server {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.diff-mine {
+  color: var(--ok);
+  font-weight: 600;
+}

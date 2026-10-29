@@ -152,6 +152,14 @@ fn main() {
             "keep leaves both untouched",
             std::fs::read_to_string(&remote).unwrap().contains("listen 3;") && state() == EditState::Conflict,
         );
+        let diff = manager.conflict_diff(info.id).await.unwrap();
+        check(
+            "conflict diff shows both sides",
+            diff.server_only == 1
+                && diff.mine_only == 1
+                && diff.hunks[0].iter().any(|l| l.text.contains("third change"))
+                && diff.hunks[0].iter().any(|l| l.text.contains("listen 4;")),
+        );
         manager.resolve(info.id, ConflictChoice::Overwrite).unwrap();
         settle().await;
         check("resolve later uploads", std::fs::read_to_string(&remote).unwrap().contains("listen 4;") && state() == EditState::Synced);

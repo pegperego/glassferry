@@ -1,5 +1,7 @@
+import { useState } from "react";
 import type { EditChoice, EditConflict } from "../api";
 import { formatSize, formatTime } from "../format";
+import { ConflictDiffView } from "./ConflictDiffView";
 
 interface Props {
   conflict: EditConflict;
@@ -7,9 +9,10 @@ interface Props {
 }
 
 export function EditConflictDialog({ conflict, onAnswer }: Props) {
+  const [showDiff, setShowDiff] = useState(false);
   return (
     <div className="modal-backdrop">
-      <div className="modal" onKeyDown={(e) => e.key === "Escape" && onAnswer("keep")}>
+      <div className={showDiff ? "modal conflict-modal wide" : "modal conflict-modal"} onKeyDown={(e) => e.key === "Escape" && onAnswer("keep")}>
         <h2>Il file è cambiato sul server</h2>
         <pre className="prompt">
           {conflict.host}:{conflict.remotePath}
@@ -29,6 +32,13 @@ export function EditConflictDialog({ conflict, onAnswer }: Props) {
             </tr>
           </tbody>
         </table>
+        {showDiff ? (
+          <ConflictDiffView editId={conflict.id} />
+        ) : (
+          <button className="inline link" onClick={() => setShowDiff(true)}>
+            Mostra le differenze
+          </button>
+        )}
         <p className="muted small">
           "Usa versione del server" sostituisce la copia aperta nell'editor; la tua versione resta accanto come "(mia
           versione)".

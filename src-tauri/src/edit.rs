@@ -628,6 +628,32 @@ impl EditManager {
         }
     }
 
+    /// The server's current version against the local copy, for the conflict dialog.
+    pub async fn conflict_diff(&self, id: u64) -> Result<crate::diff::ConflictDiff> {
+        let edit = self.get(id)?;
+        let Some(session) = edit.session.lock().unwrap().clone() else {
+            return Err(AppError::Other("connessione chiusa: riconnetti per vedere le differenze".into()));
+        };
+        let (remote_path, local_path) = {
+            let info = edit.info.lock().unwrap();
+            (info.remote_path.clone(), info.local_path.clone())
+        };
+        let mine = tokio::fs::read(&local_path).await?;
+        let mut op = session.launcher.log(Channel::Sftp, "edit-diff", &remote_path);
+        op.equivalent(session.launcher.sftp_equivalent("get", &[&remote_path]));
+        let size = session.sftp.fs().metadata(&remote_path).await.ok().and_then(|m| m.len()).unwrap_or(0);
+        if size as usize > crate::diff::MAX_DIFF_BYTES {
+            op.ok(Some("troppo grande per il confronto".into()));
+            return Ok(crate::diff::ConflictDiff { too_large: true, ..Default::default() });
+        }
+        let server = op.result(session.sftp.fs().read(&remote_path).await.map_err(AppError::from), |b| {
+            Some(crate::transfer::format_bytes(b.len() as u64))
+        })?;
+        tokio::task::spawn_blocking(move || crate::diff::diff(&server, &mine))
+            .await
+            .map_err(|e| AppError::Other(e.to_string()))
+    }
+
     pub fn reopen(&self, id: u64) -> Result<()> {
         self.launch(&self.get(id)?.info.lock().unwrap().local_path)
     }

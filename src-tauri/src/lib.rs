@@ -3,6 +3,7 @@ pub mod askpass;
 pub mod attrs;
 pub mod dirsize;
 pub mod connections;
+pub mod diff;
 pub mod edit;
 pub mod entry;
 pub mod error;
@@ -680,6 +681,11 @@ fn edit_resolve(state: State<'_, AppState>, id: u64, choice: ConflictChoice) -> 
 }
 
 #[tauri::command]
+async fn edit_conflict_diff(state: State<'_, AppState>, id: u64) -> Result<diff::ConflictDiff> {
+    state.edits.conflict_diff(id).await
+}
+
+#[tauri::command]
 fn edit_reopen(state: State<'_, AppState>, id: u64) -> Result<()> {
     state.edits.reopen(id)
 }
@@ -874,6 +880,7 @@ pub fn run() {
             edit_resolve,
             edit_confirm_save,
             edit_reopen,
+            edit_conflict_diff,
             edit_reveal,
             local_open
         ])

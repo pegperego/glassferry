@@ -10,7 +10,7 @@ Stato: **da fare** (deciso, va pianificato), **proposta** (da valutare), **in an
 
 Prima delle funzioni nuove: nessuna perdita di dati e nessun blocco nei casi già supportati.
 
-Sviluppo completato il 2026-10-28 (le voci sono in "Fatto"); manca la prova nell'app vera delle quattro novità prima di pubblicare la 0.2. Le due prove che richiedono altri ambienti sono state rimandate, sotto "Da collocare".
+Completata: sviluppo il 2026-10-28 (le voci sono in "Fatto"), provata nell'app il 2026-10-29. Le due prove che richiedono altri ambienti sono state rimandate, sotto "Da collocare".
 
 ## Wave 2 — Uso quotidiano (0.3)
 
@@ -86,3 +86,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Segnalibri di cartelle per connessione e locali (★, ⌘D, palette ⌘K) | `e580830` |
 | chmod / chown / chgrp da interfaccia (anche ricorsivi), con anteprima dei comandi | `fc841dd` |
 | Dimensione delle cartelle su richiesta (`du` sul server, visita SFTP o locale) | `b5fc9b3` |
+| Wave 1 provata nell'app (2026-10-29) | — |

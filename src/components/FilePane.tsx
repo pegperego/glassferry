@@ -12,7 +12,7 @@ import {
 import { isDirLike, type AttrChange, type DirSize, type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
 import type { Protection } from "../connections";
 import { clickSelect, emptySelection, moveCursor, selectAll, toggleSort, type SortKey } from "../fileList";
-import { formatPermissions, formatSize, formatTime } from "../format";
+import { formatOwner, formatPermissions, formatSize, formatTime, ownerTitle } from "../format";
 import type { DragPayload, Side } from "../dnd";
 import { beginPointerDrag, registerDropZone, useDragState, type DropZone } from "../pointerDrag";
 import { joinPath, parentPath, pathSegments } from "../paths";
@@ -461,6 +461,11 @@ export function FilePane(props: Props) {
         <button title="Aggiorna" onClick={() => void pane.refresh()} disabled={pane.loading}>
           ⟳
         </button>
+        {ops.openTerminal && (
+          <button title="Apri nel terminale (⌥⌘T)" className="mono" disabled={path === null} onClick={() => terminalAt(path)}>
+            &gt;_
+          </button>
+        )}
         {transfer && (
           <button
             className="transfer-button"
@@ -496,6 +501,7 @@ export function FilePane(props: Props) {
           <SortHeader label="Dimensione" column="size" sort={sort} onSort={pane.setSort} className="num" />
           <SortHeader label="Modificato" column="modified" sort={sort} onSort={pane.setSort} />
           <span className="col-perm">Permessi</span>
+          <span className="col-owner">Proprietario</span>
         </div>
         <div className="file-scroll" ref={scrollRef}>
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
@@ -534,6 +540,9 @@ export function FilePane(props: Props) {
                   {isDirLike(entry) ? <FolderSize size={sizes.get(entry.name)} /> : <span className="num">{formatSize(entry.size)}</span>}
                   <span>{formatTime(entry.modified)}</span>
                   <span className="col-perm mono">{formatPermissions(entry.permissions)}</span>
+                  <span className="col-owner mono" title={ownerTitle(entry)}>
+                    {formatOwner(entry)}
+                  </span>
                 </div>
               );
             })}

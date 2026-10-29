@@ -1,7 +1,7 @@
 //! Local filesystem access for the left pane.
 
 use std::fs::Metadata;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -61,6 +61,10 @@ fn to_entry(name: String, kind: EntryKind, target_is_dir: bool, meta: &Metadata)
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_secs()),
         permissions: Some(meta.permissions().mode() & 0o7777),
+        uid: Some(meta.uid()),
+        gid: Some(meta.gid()),
+        owner: crate::ids::local_user(meta.uid()),
+        group: crate::ids::local_group(meta.gid()),
     }
 }
 

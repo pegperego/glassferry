@@ -6,6 +6,7 @@ pub mod edit;
 pub mod entry;
 pub mod error;
 pub mod fileops;
+pub mod ids;
 pub mod local;
 pub mod log;
 pub mod plan;
@@ -144,6 +145,12 @@ async fn open_terminal(state: State<'_, AppState>, target: Target, path: String)
     op.equivalent(equivalent);
     op.result(terminal::open(&settings, &state.runtime_dir, &script).await, |how| Some(how.clone()))?;
     Ok(())
+}
+
+/// Terminals the app knows that are installed on this machine.
+#[tauri::command]
+fn terminal_list() -> Vec<terminal::TerminalApp> {
+    terminal::installed()
 }
 
 /// `ssh -V` of `path` (the configured binary when `None`).
@@ -656,6 +663,7 @@ pub fn run() {
             settings_save,
             ssh_check,
             open_terminal,
+            terminal_list,
             connections_load,
             connections_save,
             connection_forget_password,

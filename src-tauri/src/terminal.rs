@@ -7,9 +7,12 @@
 //! terminal too.
 //!
 //! The terminal runs a one-shot script written to the private runtime dir
-//! (it removes itself): `open -a <app> <script>.command` on macOS (Terminal
-//! and iTerm run it, no automation permission needed), `$TERMINAL -e` or
-//! `x-terminal-emulator -e` on Linux, or a custom command with `{script}`.
+//! (it removes itself). The terminals the app knows (`KNOWN`) are detected
+//! where they are installed and started the way each one runs a program:
+//! `open -a` for Terminal and iTerm2 (they run a `.command` file, no
+//! automation permission needed), `open -na ... --args -e` for Ghostty,
+//! the bundled binary for WezTerm, kitty, Alacritty, the command in the PATH
+//! on Linux. Any other terminal: a custom command with `{script}`.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,13 +24,104 @@ use crate::error::{AppError, Result};
 use crate::log::shell_line;
 use crate::session::sh_quote;
 
-pub const DEFAULT_MAC_APP: &str = "Terminal";
 pub const PLACEHOLDER: &str = "{script}";
+
+/// How a terminal runs the script.
+#[derive(Clone, Copy)]
+enum Start {
+    /// `open -a <app> <script>`: the app opens the `.command` file.
+    OpenFile,
+    /// `open -na <app> --args <args> <script>`.
+    OpenArgs(&'static [&'static str]),
+    /// `<program> <args> <script>`: the binary inside the bundle (macOS)
+    /// or the command in the PATH (Linux).
+    Exec(&'static [&'static str]),
+}
+
+struct Known {
+    id: &'static str,
+    name: &'static str,
+    /// macOS: app bundle name; Linux: command.
+    install: &'static str,
+    /// macOS, `Start::Exec`: the binary inside the bundle.
+    binary: &'static str,
+    start: Start,
+}
+
+#[cfg(target_os = "macos")]
+const KNOWN: &[Known] = &[
+    Known { id: "terminal", name: "Terminal", install: "Terminal.app", binary: "", start: Start::OpenFile },
+    Known { id: "iterm", name: "iTerm2", install: "iTerm.app", binary: "", start: Start::OpenFile },
+    Known { id: "ghostty", name: "Ghostty", install: "Ghostty.app", binary: "", start: Start::OpenArgs(&["-e"]) },
+    Known { id: "wezterm", name: "WezTerm", install: "WezTerm.app", binary: "Contents/MacOS/wezterm", start: Start::Exec(&["start", "--"]) },
+    Known { id: "kitty", name: "kitty", install: "kitty.app", binary: "Contents/MacOS/kitty", start: Start::Exec(&[]) },
+    Known { id: "alacritty", name: "Alacritty", install: "Alacritty.app", binary: "Contents/MacOS/alacritty", start: Start::Exec(&["-e"]) },
+];
+
+#[cfg(not(target_os = "macos"))]
+const KNOWN: &[Known] = &[
+    Known { id: "x-terminal-emulator", name: "Predefinito di sistema (x-terminal-emulator)", install: "x-terminal-emulator", binary: "", start: Start::Exec(&["-e"]) },
+    Known { id: "gnome-terminal", name: "GNOME Terminal", install: "gnome-terminal", binary: "", start: Start::Exec(&["--"]) },
+    Known { id: "konsole", name: "Konsole", install: "konsole", binary: "", start: Start::Exec(&["-e"]) },
+    Known { id: "xfce4-terminal", name: "Xfce Terminal", install: "xfce4-terminal", binary: "", start: Start::Exec(&["-x"]) },
+    Known { id: "kitty", name: "kitty", install: "kitty", binary: "", start: Start::Exec(&[]) },
+    Known { id: "alacritty", name: "Alacritty", install: "alacritty", binary: "", start: Start::Exec(&["-e"]) },
+    Known { id: "wezterm", name: "WezTerm", install: "wezterm", binary: "", start: Start::Exec(&["start", "--"]) },
+    Known { id: "xterm", name: "xterm", install: "xterm", binary: "", start: Start::Exec(&["-e"]) },
+];
+
+/// A terminal found on this machine.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalApp {
+    pub id: String,
+    pub name: String,
+}
+
+/// Where a known terminal is installed: the app bundle, or the command.
+fn locate(known: &Known) -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        let home = dirs::home_dir().unwrap_or_default();
+        [
+            PathBuf::from("/Applications"),
+            home.join("Applications"),
+            PathBuf::from("/System/Applications/Utilities"),
+            PathBuf::from("/Applications/Utilities"),
+        ]
+        .into_iter()
+        .map(|dir| dir.join(known.install))
+        .find(|path| path.is_dir())
+    } else {
+        std::env::var_os("PATH")
+            .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|dir| dir.join(known.install))
+            .find(|path| path.is_file())
+    }
+}
+
+/// The known terminals installed here, in the order of `KNOWN`.
+pub fn installed() -> Vec<TerminalApp> {
+    KNOWN
+        .iter()
+        .filter(|k| locate(k).is_some())
+        .map(|k| TerminalApp { id: k.id.into(), name: k.name.into() })
+        .collect()
+}
+
+/// `app` as stored: an id, or a name from older settings ("Terminal", "iTerm").
+fn known(app: &str) -> Option<&'static Known> {
+    KNOWN
+        .iter()
+        .find(|k| k.id.eq_ignore_ascii_case(app) || k.name.eq_ignore_ascii_case(app) || k.install.trim_end_matches(".app").eq_ignore_ascii_case(app))
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TerminalSettings {
-    /// macOS application that runs the script (`open -a`); `None`: Terminal.
+    /// Id of a known terminal (`installed`); `None`: Terminal on macOS,
+    /// `$TERMINAL` or the first one installed on Linux.
     pub app: Option<String>,
     /// Command line run with `sh -c`, `{script}` replaced by the script's
     /// path; overrides `app` and the Linux default.
@@ -117,19 +211,54 @@ async fn launch(settings: &TerminalSettings, script: &Path) -> Result<String> {
         spawn(Command::new("/bin/sh").arg("-c").arg(&line))?;
         return Ok(line);
     }
-    if cfg!(target_os = "macos") {
-        let app = settings.app.as_deref().unwrap_or(DEFAULT_MAC_APP);
-        let output = Command::new("open").args(["-a", app]).arg(script).output().await?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AppError::Other(format!("impossibile aprire {app}: {}", stderr.trim())));
+    let chosen = match settings.app.as_deref() {
+        Some(app) => Some(known(app).ok_or_else(|| AppError::Other(format!("terminale sconosciuto: {app}")))?),
+        None if cfg!(target_os = "macos") => known("terminal"),
+        None => {
+            // Linux without a choice: $TERMINAL, as many tools do.
+            if let Some(terminal) = std::env::var("TERMINAL").ok().filter(|t| !t.is_empty()) {
+                spawn(Command::new(&terminal).arg("-e").arg(script))
+                    .map_err(|e| AppError::Other(format!("{terminal}: {e}")))?;
+                return Ok(shell_line([terminal.as_str(), "-e", &script_arg]));
+            }
+            KNOWN.iter().find(|k| locate(k).is_some())
         }
-        return Ok(shell_line(["open", "-a", app, &script_arg]));
+    };
+    let Some(known) = chosen else {
+        return Err(AppError::Other("nessun terminale trovato: scegline uno o imposta un comando nelle Impostazioni".into()));
+    };
+    let Some(location) = locate(known) else {
+        return Err(AppError::Other(format!("{} non è installato: scegli un altro terminale nelle Impostazioni", known.name)));
+    };
+    let location_arg = location.to_string_lossy().into_owned();
+    match known.start {
+        Start::OpenFile | Start::OpenArgs(_) => {
+            let mut args: Vec<String> = match known.start {
+                Start::OpenArgs(extra) => {
+                    let mut args = vec!["-na".to_string(), location_arg.clone(), "--args".into()];
+                    args.extend(extra.iter().map(|a| a.to_string()));
+                    args
+                }
+                _ => vec!["-a".to_string(), location_arg.clone()],
+            };
+            args.push(script_arg.clone());
+            let output = Command::new("open").args(&args).output().await?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AppError::Other(format!("impossibile aprire {}: {}", known.name, stderr.trim())));
+            }
+            Ok(shell_line(std::iter::once("open".to_string()).chain(args)))
+        }
+        Start::Exec(extra) => {
+            let program = if known.binary.is_empty() { location } else { location.join(known.binary) };
+            spawn(Command::new(&program).args(extra).arg(script))
+                .map_err(|e| AppError::Other(format!("{}: {e}", known.name)))?;
+            let mut line = vec![program.to_string_lossy().into_owned()];
+            line.extend(extra.iter().map(|a| a.to_string()));
+            line.push(script_arg);
+            Ok(shell_line(line))
+        }
     }
-    let terminal = std::env::var("TERMINAL").ok().filter(|t| !t.is_empty()).unwrap_or("x-terminal-emulator".into());
-    spawn(Command::new(&terminal).arg("-e").arg(script))
-        .map_err(|e| AppError::Other(format!("{terminal}: {e} (imposta un comando nelle Impostazioni)")))?;
-    Ok(shell_line([terminal.as_str(), "-e", &script_arg]))
 }
 
 /// Starts the terminal without waiting for it (it runs until closed).
@@ -190,6 +319,19 @@ mod tests {
         let printed = String::from_utf8_lossy(&output.stdout).trim().to_string();
         assert_eq!(std::fs::canonicalize(printed).unwrap(), std::fs::canonicalize(&target).unwrap());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn finds_terminals_by_id_or_old_names() {
+        let first = &KNOWN[0];
+        assert_eq!(known(first.id).map(|k| k.id), Some(first.id));
+        assert_eq!(known(&first.name.to_uppercase()).map(|k| k.id), Some(first.id));
+        assert!(known("no-such-terminal").is_none());
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(known("iTerm").map(|k| k.id), Some("iterm"));
+            assert!(installed().iter().any(|t| t.id == "terminal"));
+        }
     }
 
     #[test]

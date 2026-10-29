@@ -1,23 +1,32 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { settingsLoad, settingsSave, sshCheck, type Settings, type SshCheck, type TerminalSettings } from "../api";
+import {
+  settingsLoad,
+  settingsSave,
+  sshCheck,
+  terminalList,
+  type Settings,
+  type SshCheck,
+  type TerminalApp,
+  type TerminalSettings,
+} from "../api";
 
 const DEFAULT_SSH = "/usr/bin/ssh";
 const IS_MAC = navigator.userAgent.includes("Mac");
-/** macOS apps that run a `.command` script with `open -a`. */
-const MAC_APPS = ["Terminal", "iTerm"];
+const AUTO = "";
 const CUSTOM = "custom";
-const LINUX_DEFAULT = "default";
 
-/** Select value for the stored terminal settings. */
-function terminalChoice(terminal: TerminalSettings): string {
+/** Select value for the stored settings: a terminal id, AUTO or CUSTOM. */
+function terminalChoice(terminal: TerminalSettings, installed: TerminalApp[]): string {
   if (terminal.command) return CUSTOM;
-  return IS_MAC ? (terminal.app ?? MAC_APPS[0]) : LINUX_DEFAULT;
+  if (!terminal.app) return AUTO;
+  // Older settings stored the app name ("Terminal", "iTerm").
+  const app = terminal.app.toLowerCase();
+  return installed.find((t) => t.id === app || t.name.toLowerCase() === app)?.id ?? terminal.app;
 }
 
 function terminalSettings(choice: string, command: string): TerminalSettings {
   if (choice === CUSTOM) return { app: null, command: command.trim() || null };
-  if (!IS_MAC || choice === MAC_APPS[0]) return { app: null, command: null };
-  return { app: choice, command: null };
+  return { app: choice === AUTO ? null : choice, command: null };
 }
 
 interface Props {
@@ -28,17 +37,19 @@ interface Props {
 export function SettingsDialog({ onClose }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sshBin, setSshBin] = useState("");
-  const [terminal, setTerminal] = useState(LINUX_DEFAULT);
+  const [terminal, setTerminal] = useState(AUTO);
+  const [installed, setInstalled] = useState<TerminalApp[]>([]);
   const [command, setCommand] = useState("");
   const [check, setCheck] = useState<{ path: string; result: SshCheck | string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    settingsLoad().then(
-      (loaded) => {
+    Promise.all([settingsLoad(), terminalList()]).then(
+      ([loaded, terminals]) => {
+        setInstalled(terminals);
         setSettings(loaded);
         setSshBin(loaded.sshBin ?? "");
-        setTerminal(terminalChoice(loaded.terminal));
+        setTerminal(terminalChoice(loaded.terminal, terminals));
         setCommand(loaded.terminal.command ?? "");
       },
       (e) => setError(String(e)),
@@ -106,16 +117,14 @@ export function SettingsDialog({ onClose }: Props) {
             <label className="field">
               "Apri nel terminale" (⌥⌘T) usa
               <select value={terminal} onChange={(e) => setTerminal(e.target.value)}>
-                {IS_MAC ? (
-                  [...new Set([...MAC_APPS, terminalChoice(settings.terminal)])]
-                    .filter((app) => app !== CUSTOM)
-                    .map((app) => (
-                      <option key={app} value={app}>
-                        {app}
-                      </option>
-                    ))
-                ) : (
-                  <option value={LINUX_DEFAULT}>Predefinito ($TERMINAL o x-terminal-emulator)</option>
+                <option value={AUTO}>{IS_MAC ? "Predefinito (Terminal)" : "Predefinito ($TERMINAL, o il primo trovato)"}</option>
+                {installed.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+                {terminal !== AUTO && terminal !== CUSTOM && !installed.some((t) => t.id === terminal) && (
+                  <option value={terminal}>{terminal} (non trovato)</option>
                 )}
                 <option value={CUSTOM}>Comando personalizzato…</option>
               </select>
@@ -125,7 +134,7 @@ export function SettingsDialog({ onClose }: Props) {
                 Comando
                 <input
                   value={command}
-                  placeholder={IS_MAC ? "open -na Ghostty --args -e {script}" : "kitty {script}"}
+                  placeholder="mio-terminale -e {script}"
                   spellCheck={false}
                   onChange={(e) => setCommand(e.target.value)}
                 />
@@ -135,7 +144,7 @@ export function SettingsDialog({ onClose }: Props) {
               Sul pannello locale il terminale si apre nella cartella corrente; su un pannello remoto apre una nuova
               connessione ssh allo stesso server e va nella cartella (l'eventuale password si inserisce nel terminale).
               {terminal === CUSTOM &&
-                " Il comando viene eseguito con sh; {script} è il percorso dello script da eseguire. Esempi: kitty {script} · wezterm start -- {script} · alacritty -e {script}."}
+                " Per un terminale non in elenco: il comando viene eseguito con sh e {script} è il percorso dello script da eseguire."}
             </p>
           </section>
         )}

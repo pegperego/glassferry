@@ -27,3 +27,14 @@ export function formatPermissions(mode: number | null): string {
   }
   return out;
 }
+
+/** `owner:group`, with the numeric ids when the names are unknown. */
+export function formatOwner(entry: { uid: number | null; gid: number | null; owner: string | null; group: string | null }): string {
+  if (entry.uid === null && entry.gid === null) return "";
+  return `${entry.owner ?? entry.uid ?? "?"}:${entry.group ?? entry.gid ?? "?"}`;
+}
+
+export function ownerTitle(entry: { uid: number | null; gid: number | null; owner: string | null; group: string | null }): string {
+  if (entry.uid === null && entry.gid === null) return "";
+  return `proprietario ${entry.owner ?? "?"} (uid ${entry.uid ?? "?"}), gruppo ${entry.group ?? "?"} (gid ${entry.gid ?? "?"})`;
+}

@@ -293,7 +293,7 @@ body.resizing * {
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 80px 120px 80px;
+  grid-template-columns: minmax(0, 1fr) 80px 120px 80px 130px;
   align-items: center;
   column-gap: 8px;
   padding: 0 8px;
@@ -347,6 +347,15 @@ body.resizing * {
 .icon {
   display: inline-block;
   width: 20px;
+}
+
+@container (max-width: 680px) {
+  .file-row {
+    grid-template-columns: minmax(0, 1fr) 80px 120px 80px;
+  }
+  .col-owner {
+    display: none;
+  }
 }
 
 @container (max-width: 520px) {
@@ -1596,4 +1605,10 @@ body.dragging.drag-refused * {
 
 .drag-action {
   opacity: 0.8;
+}
+
+.col-owner {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

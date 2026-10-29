@@ -23,4 +23,9 @@ pub struct FileEntry {
     pub modified: Option<u64>,
     /// Permission bits (`0o7777` mask).
     pub permissions: Option<u32>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    /// Names of `uid` and `gid` when known; otherwise the UI shows the numbers.
+    pub owner: Option<String>,
+    pub group: Option<String>,
 }

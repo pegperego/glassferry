@@ -35,18 +35,28 @@ export function PermissionsDialog({ dir, entries, attrs, canChown, protection, o
   const [mode, setMode] = useState(initial);
   const [octal, setOctal] = useState(initial.toString(8).padStart(3, "0"));
   const [recursive, setRecursive] = useState(false);
-  const [owner, setOwner] = useState("");
-  const [group, setGroup] = useState("");
+  // Current owner and group, when the whole selection shares them (names, else ids).
+  const common = (pick: (e: FileEntry) => string | number | null) => {
+    const values = new Set(entries.map((e) => pick(e)));
+    const [only] = values;
+    return values.size === 1 && only !== null && only !== undefined ? String(only) : "";
+  };
+  const initialOwner = common((e) => e.owner ?? e.uid);
+  const initialGroup = common((e) => e.group ?? e.gid);
+  const [owner, setOwner] = useState(initialOwner);
+  const [group, setGroup] = useState(initialGroup);
   const [preview, setPreview] = useState<{ lines: string[] } | { error: string } | null>(null);
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasDirs = entries.some((e) => e.kind === "dir");
 
+  // Only what the user changed: an untouched field keeps each item's own owner or group.
+  const edited = (value: string, initial: string) => (value.trim() && value.trim() !== initial ? value.trim() : null);
   const change: AttrChange = {
     mode: changeMode ? mode : null,
-    owner: owner.trim() || null,
-    group: group.trim() || null,
+    owner: edited(owner, initialOwner),
+    group: edited(group, initialGroup),
     recursive: hasDirs && recursive,
   };
   const key = JSON.stringify(change);
@@ -145,15 +155,31 @@ export function PermissionsDialog({ dir, entries, attrs, canChown, protection, o
             </label>
           </div>
         )}
+        {!canChown && (initialOwner || initialGroup) && (
+          <p className="muted small">
+            Proprietario {initialOwner || "diversi"}, gruppo {initialGroup || "diversi"}: si cambiano solo sui server con
+            chown e chgrp.
+          </p>
+        )}
         {canChown && (
           <div className="field-row">
             <label className="field">
               Proprietario
-              <input value={owner} placeholder="invariato" spellCheck={false} onChange={(e) => setOwner(e.target.value)} />
+              <input
+                value={owner}
+                placeholder={initialOwner ? "invariato" : "diversi: invariati"}
+                spellCheck={false}
+                onChange={(e) => setOwner(e.target.value)}
+              />
             </label>
             <label className="field">
               Gruppo
-              <input value={group} placeholder="invariato" spellCheck={false} onChange={(e) => setGroup(e.target.value)} />
+              <input
+                value={group}
+                placeholder={initialGroup ? "invariato" : "diversi: invariati"}
+                spellCheck={false}
+                onChange={(e) => setGroup(e.target.value)}
+              />
             </label>
           </div>
         )}

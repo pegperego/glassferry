@@ -15,8 +15,8 @@ interface Props {
  * "Nuovo collegamento" (⌘K): search a connection, Enter or double click connects.
  * A single click only moves the cursor: connecting on click closed the palette
  * under the pointer, so the second click of an instinctive double click landed
- * on the pane below and opened a folder or a file. While typing, matching
- * bookmarks come first.
+ * on the pane below and opened a folder or a file. Bookmarks follow the
+ * connections (all of them, or those matching the search).
  */
 export function QuickConnect({ store, onConnect, onOpenBookmark, onManage, onClose }: Props) {
   const [query, setQuery] = useState("");
@@ -24,13 +24,13 @@ export function QuickConnect({ store, onConnect, onOpenBookmark, onManage, onClo
   const matches = useMemo(() => searchConnections(store, query), [store, query]);
   const groups = useMemo(() => groupByCategory(store, matches), [store, matches]);
   const marks = useMemo(() => searchBookmarks(store, query), [store, query]);
-  // Display order drives the keyboard cursor: bookmarks, then connections by category.
+  // Display order drives the keyboard cursor: connections by category, then bookmarks.
   const ordered = groups.flatMap((g) => g.items);
-  const total = marks.length + ordered.length;
+  const total = ordered.length + marks.length;
   const choose = (index: number) => {
-    const mark = marks[index];
+    if (ordered[index]) onConnect(ordered[index].id);
+    const mark = marks[index - ordered.length];
     if (mark) onOpenBookmark(mark.connection.id, mark.bookmark.path);
-    else if (ordered[index - marks.length]) onConnect(ordered[index - marks.length].id);
   };
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -66,28 +66,6 @@ export function QuickConnect({ store, onConnect, onOpenBookmark, onManage, onClo
           <p className="muted palette-empty">Nessuna connessione corrisponde.</p>
         ) : (
           <ul className="palette-list" ref={listRef}>
-            {marks.length > 0 && (
-              <li>
-                <div className="palette-group">★ Segnalibri</div>
-                <ul>
-                  {marks.map(({ bookmark, connection }, index) => (
-                    <li
-                      key={bookmark.id}
-                      className={index === cursor ? "palette-item cursor" : "palette-item"}
-                      onMouseMove={() => setCursor(index)}
-                      onClick={() => setCursor(index)}
-                      onDoubleClick={() => choose(index)}
-                    >
-                      <span className="category-bar" style={{ background: categoryOf(store, connection)?.color }} />
-                      <span className="palette-name">{bookmark.name}</span>
-                      <span className="muted palette-target">
-                        {connection.name}:{bookmark.path}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </li>
-            )}
             {groups.map((group) => (
               <li key={group.category.id}>
                 <div className="palette-group">
@@ -97,7 +75,7 @@ export function QuickConnect({ store, onConnect, onOpenBookmark, onManage, onClo
                 </div>
                 <ul>
                   {group.items.map((connection) => {
-                    const index = marks.length + ordered.indexOf(connection);
+                    const index = ordered.indexOf(connection);
                     return (
                       <li
                         key={connection.id}
@@ -120,6 +98,28 @@ export function QuickConnect({ store, onConnect, onOpenBookmark, onManage, onClo
                 </ul>
               </li>
             ))}
+            {marks.length > 0 && (
+              <li>
+                <div className="palette-group">★ Segnalibri</div>
+                <ul>
+                  {marks.map(({ bookmark, connection }, i) => (
+                    <li
+                      key={bookmark.id}
+                      className={ordered.length + i === cursor ? "palette-item cursor" : "palette-item"}
+                      onMouseMove={() => setCursor(ordered.length + i)}
+                      onClick={() => setCursor(ordered.length + i)}
+                      onDoubleClick={() => choose(ordered.length + i)}
+                    >
+                      <span className="category-bar" style={{ background: categoryOf(store, connection)?.color }} />
+                      <span className="palette-name">{bookmark.name}</span>
+                      <span className="muted palette-target">
+                        {connection.name}:{bookmark.path}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            )}
           </ul>
         )}
         <div className="palette-footer muted small">

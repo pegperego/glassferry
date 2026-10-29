@@ -30,6 +30,11 @@ export interface FileEntry {
   /** Seconds since the Unix epoch. */
   modified: number | null;
   permissions: number | null;
+  uid: number | null;
+  gid: number | null;
+  /** Names of `uid`/`gid` when known (remote: from the server's /etc/passwd and /etc/group). */
+  owner: string | null;
+  group: string | null;
 }
 
 export type PromptKind = "secret" | "confirm" | "notice" | "hostKey";
@@ -103,9 +108,17 @@ export interface Settings {
   terminal: TerminalSettings;
 }
 
+/** A terminal the app knows, installed on this machine. */
+export interface TerminalApp {
+  id: string;
+  name: string;
+}
+
+export const terminalList = () => invoke<TerminalApp[]>("terminal_list");
+
 /** How "Apri nel terminale" opens the terminal. */
 export interface TerminalSettings {
-  /** macOS app that runs the script (`open -a`); null: Terminal. */
+  /** Id of an installed terminal (`terminalList`); null: the default. */
   app: string | null;
   /** Command run with `sh -c`, `{script}` replaced by the script path; overrides `app`. */
   command: string | null;

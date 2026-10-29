@@ -60,7 +60,7 @@ describe("bookmarks", () => {
     expect(searchBookmarks(s, "web 10")).toHaveLength(1);
     // Local bookmarks are not connections.
     expect(searchBookmarks(s, "users")).toHaveLength(0);
-    expect(searchBookmarks(s, "")).toHaveLength(0);
+    expect(searchBookmarks(s, "")).toHaveLength(1);
   });
 
   it("merge from an import only for known connections", () => {

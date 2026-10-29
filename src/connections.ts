@@ -151,10 +151,9 @@ export function removeBookmark(store: Store, id: string): Store {
   return { ...store, bookmarks: store.bookmarks.filter((b) => b.id !== id) };
 }
 
-/** Remote bookmarks for the quick connect palette: by bookmark name, path or connection name. */
+/** Remote bookmarks for the quick connect palette: by bookmark name, path or connection name; all for an empty query. */
 export function searchBookmarks(store: Store, query: string): { bookmark: Bookmark; connection: Connection }[] {
   const q = query.trim().toLowerCase();
-  if (!q) return [];
   return store.bookmarks.flatMap((bookmark) => {
     const connection = store.connections.find((c) => c.id === bookmark.connectionId);
     if (!connection) return [];

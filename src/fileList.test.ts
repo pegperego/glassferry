@@ -9,6 +9,10 @@ const entry = (name: string, kind: FileEntry["kind"], size = 0, modified = 0): F
   size,
   modified,
   permissions: 0o644,
+  uid: 501,
+  gid: 20,
+  owner: "me",
+  group: "staff",
 });
 
 describe("visibleEntries", () => {

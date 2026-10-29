@@ -294,6 +294,8 @@ pub struct Session {
     pub sftp: Sftp,
     pub home: PathBuf,
     pub capabilities: Capabilities,
+    /// Owner and group names, read on first use.
+    id_names: tokio::sync::OnceCell<crate::ids::IdNames>,
     _sftp_process: Child,
 }
 
@@ -349,6 +351,7 @@ impl Session {
             sftp,
             home,
             capabilities,
+            id_names: tokio::sync::OnceCell::new(),
             _sftp_process: child,
         })
     }
@@ -395,9 +398,41 @@ impl Session {
                 size: meta.len(),
                 modified: meta.modified().map(|t| t.as_duration().as_secs()),
                 permissions: meta.permissions().map(|p| p.as_raw().bits()),
+                uid: meta.uid(),
+                gid: meta.gid(),
+                owner: None,
+                group: None,
             });
         }
+        let names = self.id_names().await;
+        for entry in &mut entries {
+            entry.owner = entry.uid.and_then(|id| names.users.get(&id).cloned());
+            entry.group = entry.gid.and_then(|id| names.groups.get(&id).cloned());
+        }
         Ok(entries)
+    }
+
+    /// `/etc/passwd` and `/etc/group` of the server, read once; empty when
+    /// unreadable (chroot, SFTP-only account) or for users from LDAP.
+    async fn id_names(&self) -> &crate::ids::IdNames {
+        self.id_names
+            .get_or_init(|| async {
+                let mut op = self.launcher.log(Channel::Sftp, "id-names", "/etc/passwd, /etc/group");
+                op.equivalent(self.launcher.sftp_equivalent("get", &["/etc/passwd"]));
+                let mut fs = self.sftp.fs();
+                let passwd = fs.read("/etc/passwd").await.map(|b| String::from_utf8_lossy(&b).into_owned());
+                let group = fs.read("/etc/group").await.map(|b| String::from_utf8_lossy(&b).into_owned());
+                let names = crate::ids::IdNames::parse(
+                    passwd.as_deref().unwrap_or_default(),
+                    group.as_deref().unwrap_or_default(),
+                );
+                match (&passwd, &group) {
+                    (Ok(_), Ok(_)) => op.ok(Some(format!("{} utenti, {} gruppi", names.users.len(), names.groups.len()))),
+                    _ => op.fail("non leggibili: proprietario e gruppo restano numerici"),
+                }
+                names
+            })
+            .await
     }
 
     pub async fn close(self) {

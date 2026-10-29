@@ -87,3 +87,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Ricerca di file per nome (⌘F): `find` sul server, visita SFTP o locale | `5414b63` |
 | Comprimere (`.tar.gz`) ed estrarre archivi (`tar`, `zip`) sul server e in locale | `eaa8639` |
 | Differenze riga per riga nel conflitto di modifica | `52ac2a9` |
+| App di modifica dei file remoti per estensione (Impostazioni) | `709fae1` |

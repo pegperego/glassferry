@@ -87,3 +87,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | chmod / chown / chgrp da interfaccia (anche ricorsivi), con anteprima dei comandi | `fc841dd` |
 | Dimensione delle cartelle su richiesta (`du` sul server, visita SFTP o locale) | `b5fc9b3` |
 | Wave 1 provata nell'app (2026-10-29) | — |
+| Dialogo "Informazioni su Glassferry" (versione, commit, licenza, componenti di terze parti) e menu macOS in italiano | `8444374` |

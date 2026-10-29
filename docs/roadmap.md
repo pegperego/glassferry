@@ -88,3 +88,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Wave 2 provata nell'app, con le correzioni (terminali installati, pulsante `>_`, segnalibri in ⌘K, proprietario e gruppo) (2026-10-29) | `201d5a9` |
 | Ricerca di file per nome (⌘F): `find` sul server, visita SFTP o locale | `5414b63` |
 | Comprimere (`.tar.gz`) ed estrarre archivi (`tar`, `zip`) sul server e in locale | `eaa8639` |
+| Differenze riga per riga nel conflitto di modifica | `52ac2a9` |

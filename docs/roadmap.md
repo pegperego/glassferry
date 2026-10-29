@@ -16,7 +16,7 @@ Completata: sviluppo il 2026-10-28 (le voci sono in "Fatto"), provata nell'app i
 
 Le funzioni che si usano tutti i giorni.
 
-Sviluppo completato il 2026-10-28 (le voci sono in "Fatto"); la prova nell'app vera si fa insieme a quella della wave 1.
+Completata: sviluppo il 2026-10-28, correzioni dopo la prova e provata nell'app il 2026-10-29 (le voci sono in "Fatto").
 
 ## Wave 3 — Strumenti lato server (0.4)
 
@@ -88,3 +88,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Dimensione delle cartelle su richiesta (`du` sul server, visita SFTP o locale) | `b5fc9b3` |
 | Wave 1 provata nell'app (2026-10-29) | — |
 | Dialogo "Informazioni su Glassferry" (versione, commit, licenza, componenti di terze parti) e menu macOS in italiano | `8444374` |
+| Wave 2 provata nell'app, con le correzioni (terminali installati, pulsante `>_`, segnalibri in ⌘K, proprietario e gruppo) (2026-10-29) | `201d5a9` |

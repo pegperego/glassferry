@@ -55,6 +55,10 @@ export interface PaneOps {
   dirSize: (dir: string, names: string[]) => Promise<DirSize[]>;
   search: (dir: string, query: SearchQuery, id: number) => Promise<SearchResult>;
   cancelSearch: (id: number) => void;
+  /** Into a .tar.gz in the same folder; null without tar. */
+  compress: ((dir: string, names: string[], archive: string) => Promise<void>) | null;
+  /** For an archive name: extracts it into a new folder (resolves to its name); null when not possible. */
+  extract: (name: string) => ((dir: string) => Promise<string>) | null;
 }
 
 /** Bookmarks of the pane's connection (or of local folders). */
@@ -93,6 +97,7 @@ interface Props {
 
 type Dialog =
   | { kind: "mkdir" }
+  | { kind: "compress"; names: string[] }
   | { kind: "search" }
   | { kind: "permissions"; names: string[] }
   | { kind: "move"; names: string[] }
@@ -368,6 +373,21 @@ export function FilePane(props: Props) {
   const menuItems = (entry: FileEntry | null): MenuItem[] => {
     const chosen = entry ? (selection.selected.has(entry.name) ? selectionOrCursor() : [entry.name]) : [];
     const chosenDirs = chosen.filter((name) => visible.some((v) => v.name === name && v.kind === "dir"));
+    const extractor = entry && chosen.length === 1 && entry.kind === "file" && isArchive(entry.name) ? ops.extract(entry.name) : null;
+    // The folder's name is known only at the end: the cursor goes there.
+    const extractOne =
+      extractor && path !== null
+        ? () => {
+            setBusy(`Estrazione di ${entry!.name}…`);
+            setOpError(null);
+            extractor(path)
+              .then((folder) => pane.refresh(folder), (e) => setOpError(String(e)))
+              .finally(() => {
+                setBusy(null);
+                listRef.current?.focus();
+              });
+          }
+        : null;
     const items: MenuItem[] = [];
     if (entry && isDirLike(entry) && chosen.length === 1) items.push({ label: "Apri", shortcut: "↩", onSelect: () => open(entry) });
     if (entry && isDirLike(entry) && chosen.length === 1 && ops.openTerminal && path)
@@ -383,6 +403,8 @@ export function FilePane(props: Props) {
         { label: "Rinomina", shortcut: "F2", disabled: chosen.length !== 1, onSelect: () => startRename(entry.name) },
         { label: "Sposta in…", onSelect: () => setDialog({ kind: "move", names: chosen }) },
         { label: "Permessi…", onSelect: () => setDialog({ kind: "permissions", names: chosen }) },
+        ...(ops.compress ? [{ label: "Comprimi in .tar.gz…", onSelect: () => setDialog({ kind: "compress", names: chosen }) }] : []),
+        ...(extractOne ? [{ label: "Estrai qui", onSelect: extractOne }] : []),
         ...(chosenDirs.length > 0
           ? [{ label: chosenDirs.length === 1 ? "Calcola dimensione" : `Calcola dimensione (${chosenDirs.length} cartelle)`, onSelect: () => computeSizes(chosenDirs) }]
           : []),
@@ -631,6 +653,24 @@ export function FilePane(props: Props) {
           }}
         />
       )}
+      {dialog?.kind === "compress" && path !== null && ops.compress && (
+        <PromptDialog
+          title={`Comprimi ${describe(dialog.names)}`}
+          label={`Archivio in ${path}`}
+          initial={dialog.names.length === 1 ? `${dialog.names[0]}.tar.gz` : "archivio.tar.gz"}
+          confirmLabel="Comprimi"
+          validate={(v) =>
+            nameError(v) ??
+            (!/\.(tar\.gz|tgz)$/i.test(v) ? "Il nome deve finire con .tar.gz" : names.includes(v) ? "Esiste già un elemento con questo nome" : null)
+          }
+          onCancel={() => setDialog(null)}
+          onSubmit={(archive) => {
+            const compress = ops.compress!;
+            setDialog(null);
+            void run(`Compressione in ${archive}…`, () => compress(path, dialog.names, archive), archive);
+          }}
+        />
+      )}
       {dialog?.kind === "move" && path !== null && (
         <PromptDialog
           title={`Sposta ${describe(dialog.names)}`}
@@ -751,4 +791,11 @@ function FolderSize({ size }: { size: DirSize | "…" | undefined }) {
       {size.partial ? "+" : ""}
     </span>
   );
+}
+
+const ARCHIVE = /\.(tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar\.zst|zip)$/i;
+
+/** Mirrors `archive::split` in the backend. */
+function isArchive(name: string): boolean {
+  return ARCHIVE.test(name) && name.replace(ARCHIVE, "") !== "";
 }

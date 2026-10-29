@@ -61,6 +61,8 @@ Folder size (`dirsize.rs`, command `fs_dir_size(target, dir, names)`, "Calcola d
 
 Search (`search.rs`, commands `fs_search(target, dir, query, searchId)` / `fs_search_cancel`, `SearchDialog` from ⌘F or ⌕ in a pane): by name below the pane's folder, `*`/`?` patterns (plain text = `*text*`), case-insensitive, files/folders/both, at most 1000 results. Remote with `find`: `find "$1" -xdev` (one filesystem), folders printed with a trailing `/` (`-exec printf`, no GNU `-printf`), cut with `head`, 2 min timeout, cancellation drops the exec (ssh killed). Without a shell (SFTP) and locally: a breadth-first walk with the same rules (symlinks not followed, same device, at most 20,000 folders). A result opens its folder, with the cursor on the file. Check: the `fileops` example.
 
+Archives (`archive.rs`, commands `fs_compress(target, dir, names, archive)` / `fs_extract(target, dir, name)`, context menu "Comprimi in .tar.gz…" / "Estrai qui"): `tar -czf` of the selection (names passed as `./name`, a failed archive removed), extraction of `.tar[.gz|.bz2|.xz|.zst]`, `.tgz`, `.tbz2`, `.txz` with `tar -xf` and `.zip` with `unzip`, into a new folder named after the archive. Never overwrites (archive or folder must not exist; tar refuses absolute and `..` members). Remote: needs `tar`/`unzip` from the probe (not on SFTP-only accounts); local: the system tar. Check: unit test and the `fileops` example.
+
 UI: context menu, F2 inline rename, F7/⇧⌘N new folder, ⌥⌘T terminal, ⌘D bookmark, ⌘F search, ⌘⌫/Delete delete with confirmation, "Sposta in…", drag onto a folder of the same pane = move.
 
 ## Editing remote files
@@ -91,7 +93,7 @@ Backend (`src-tauri/src/`):
 - `ids.rs` — owner/group names (see File operations)
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
-- `transfer.rs`, `fileops.rs`, `attrs.rs`, `dirsize.rs`, `search.rs`, `edit.rs`, `plan.rs` — see the sections above
+- `transfer.rs`, `fileops.rs`, `attrs.rs`, `dirsize.rs`, `search.rs`, `archive.rs`, `edit.rs`, `plan.rs` — see the sections above
 - `src-tauri/examples/` — headless checks against the fixture: `spike.rs` (connect/probe/list/throughput), `transfer.rs`, `remote_copy.rs`, `resume.rs`, `fileops.rs`, `edit.rs`, `connections.rs` (`-F`, ProxyJump between app connections, `ssh -G` errors, keychain round trip: `cargo run --example connections -- "$PWD/../.dev-sshd" segreta <work-dir>`)
 
 Frontend (`src/`):

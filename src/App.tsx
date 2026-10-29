@@ -8,6 +8,8 @@ import {
   fsAttrs,
   fsDirSize,
   fsSearch,
+  fsCompress,
+  fsExtract,
   fsSearchCancel,
   fsMove,
   fsPlan,
@@ -71,8 +73,12 @@ type Modal =
   | { kind: "disconnect"; slot: number; files: EditInfo[]; then: () => void }
   | null;
 
-/** What the account allows beyond SFTP: a shell (remote terminal), chown/chgrp. */
-function paneOps(target: Target, protection: Protection | null, can: { shell: boolean; chown: boolean }): PaneOps {
+/** What the account allows beyond SFTP: a shell (remote terminal), chown/chgrp, tar/unzip. */
+function paneOps(
+  target: Target,
+  protection: Protection | null,
+  can: { shell: boolean; chown: boolean; tar: boolean; unzip: boolean },
+): PaneOps {
   return {
     mkdir: (dir, name) => fsMkdir(target, dir, name),
     rename: (dir, from, to) => fsRename(target, dir, from, to),
@@ -86,12 +92,15 @@ function paneOps(target: Target, protection: Protection | null, can: { shell: bo
     attrs: (dir, names, change, dryRun) => fsAttrs(target, dir, names, change, dryRun),
     dirSize: (dir, names) => fsDirSize(target, dir, names),
     search: (dir, query, id) => fsSearch(target, dir, query, id),
+    compress: can.tar ? (dir, names, archive) => fsCompress(target, dir, names, archive) : null,
+    extract: (name) =>
+      (name.toLowerCase().endsWith(".zip") ? can.unzip : can.tar) ? (dir) => fsExtract(target, dir, name) : null,
     cancelSearch: (id) => void fsSearchCancel(id).catch(() => {}),
     canChown: can.chown,
   };
 }
 
-const localOps = paneOps({ kind: "local" }, null, { shell: true, chown: false });
+const localOps = paneOps({ kind: "local" }, null, { shell: true, chown: false, tar: true, unzip: true });
 
 /** `dir` is `path` or inside it. */
 const within = (path: string | null, dir: string) =>
@@ -418,6 +427,8 @@ export default function App() {
             {
               shell: s.result.capabilities.shell,
               chown: ["chown", "chgrp"].every((c) => s.result.capabilities.commands.includes(c)),
+              tar: s.result.capabilities.commands.includes("tar"),
+              unzip: s.result.capabilities.commands.includes("unzip"),
             },
           )}
           connection={s.connection}

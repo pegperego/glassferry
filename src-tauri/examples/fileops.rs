@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
+use glassferry_lib::archive;
 use glassferry_lib::askpass::{AskpassServer, PromptKind};
 use glassferry_lib::attrs::{self, AttrChange};
 use glassferry_lib::dirsize;
@@ -188,6 +189,25 @@ fn main() {
         let files = SearchQuery { text: "*.conf".into(), kind: SearchKind::File };
         let found = search::remote::search(&session, &format!("{work}/found"), &files, &Cancel::default()).await.unwrap();
         check("search files only", found.matches.len() == 1 && !found.matches[0].dir);
+
+        // Archives: tar on the server; SFTP-only accounts refuse with a clear message.
+        std::fs::create_dir_all(format!("{work}/pack/site/sub")).unwrap();
+        std::fs::write(format!("{work}/pack/site/sub/a.txt"), b"alpha").unwrap();
+        let pack = format!("{work}/pack");
+        let compressed = archive::remote::compress(&session, &pack, &["site".into()], "backup.tar.gz").await;
+        if session.capabilities.commands.iter().any(|c| c == "tar") {
+            let extracted = archive::remote::extract(&session, &pack, "backup.tar.gz").await;
+            check(
+                "compress and extract on the server",
+                compressed.is_ok()
+                    && extracted.as_ref().is_ok_and(|f| f == "backup")
+                    && std::fs::read(format!("{pack}/backup/site/sub/a.txt")).unwrap() == b"alpha",
+            );
+            // Extracting again: the folder exists now.
+            check("extract never overwrites", archive::remote::extract(&session, &pack, "backup.tar.gz").await.is_err());
+        } else {
+            check("archives need tar", compressed.is_err_and(|e| e.to_string().contains("tar")));
+        }
 
         session.close().await;
         let _ = std::fs::remove_dir_all(&work);

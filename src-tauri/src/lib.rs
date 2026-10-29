@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod askpass;
 pub mod attrs;
 pub mod dirsize;
@@ -580,6 +581,24 @@ async fn fs_dir_size(state: State<'_, AppState>, target: Target, dir: String, na
     }
 }
 
+/// Compresses `names` in `dir` into `dir/archive` (.tar.gz).
+#[tauri::command]
+async fn fs_compress(state: State<'_, AppState>, target: Target, dir: String, names: Vec<String>, archive: String) -> Result<()> {
+    match target {
+        Target::Local => archive::local::compress(&state.logger, &dir, &names, &archive).await,
+        Target::Remote { session_id } => archive::remote::compress(&*state.session(session_id)?, &dir, &names, &archive).await,
+    }
+}
+
+/// Extracts `dir/name` into a new folder named after it; returns that name.
+#[tauri::command]
+async fn fs_extract(state: State<'_, AppState>, target: Target, dir: String, name: String) -> Result<String> {
+    match target {
+        Target::Local => archive::local::extract(&state.logger, &dir, &name).await,
+        Target::Remote { session_id } => archive::remote::extract(&*state.session(session_id)?, &dir, &name).await,
+    }
+}
+
 /// Files below `dir` whose name matches; `search_id` lets the UI cancel it.
 #[tauri::command]
 async fn fs_search(
@@ -843,6 +862,8 @@ pub fn run() {
             fs_attrs,
             fs_dir_size,
             fs_search,
+            fs_compress,
+            fs_extract,
             fs_search_cancel,
             fs_plan,
             fs_plan_execute,

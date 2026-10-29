@@ -24,7 +24,6 @@ Quasi tutte richiedono la shell: sugli account solo SFTP non sono disponibili.
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
-| Comprimere ed estrarre archivi sul server | proposta | 2026-10-27 | `tar` via shell; non possibile sugli account solo SFTP |
 | Diff nel conflitto di modifica | proposta | 2026-10-27 | Oggi il dialogo mostra solo dimensione e data |
 | Scegliere l'app di modifica per tipo di file | proposta | 2026-10-27 | Oggi si usa sempre l'app predefinita del sistema |
 

@@ -364,6 +364,13 @@ export const fsSearch = (target: Target, dir: string, query: SearchQuery, search
 
 export const fsSearchCancel = (searchId: number) => invoke<void>("fs_search_cancel", { searchId });
 
+/** Compresses `names` into `dir/archive` (.tar.gz); never overwrites. */
+export const fsCompress = (target: Target, dir: string, names: string[], archive: string) =>
+  invoke<void>("fs_compress", { target, dir, names, archive });
+
+/** Extracts `dir/name` into a new folder named after it; returns that folder's name. */
+export const fsExtract = (target: Target, dir: string, name: string) => invoke<string>("fs_extract", { target, dir, name });
+
 /** Opens the system terminal in `path` (remote: a new ssh connection that changes to it). */
 export const openTerminal = (target: Target, path: string) => invoke<void>("open_terminal", { target, path });
 

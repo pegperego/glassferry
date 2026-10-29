@@ -7,6 +7,8 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react()],
+  // The third-party license data (~660 kB) is its own chunk, loaded on demand.
+  build: { chunkSizeWarningLimit: 800 },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

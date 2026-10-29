@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/third-party.mjs && tsc && vite build",
+    "third-party": "node scripts/third-party.mjs",
     "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri"

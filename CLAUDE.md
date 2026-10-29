@@ -75,6 +75,10 @@ UI: double click / Enter on a remote file = edit, on a local file = open with th
 
 `terminal.rs`, command `open_terminal(target, path)`: ⌥⌘T in a pane (current folder) or "Apri nel terminale" in the context menu (a folder, or the current one). Local: the login shell starts in the folder. Remote: a new, independent `ssh [-F file] -t -o RemoteCommand=none -- alias '<cd + exec $SHELL -l>'` (path as a positional parameter of `sh -c`), authenticated in the terminal, not through the app's ControlMaster (closing the pane would close it); not offered on SFTP-only accounts (`PaneOps.openTerminal` null). The terminal runs a one-shot script in the runtime dir that deletes itself. Known terminals (`KNOWN` in `terminal.rs`) are detected where installed (`terminal_list`: macOS app bundles in /Applications, ~/Applications, /System/Applications/Utilities; Linux commands in the PATH) and started their own way: `open -a` for Terminal and iTerm2 (they run a `.command` file, no automation permission), `open -na Ghostty.app --args -e`, the bundled binary for WezTerm/kitty/Alacritty, the command with its flag on Linux. Settings store the terminal id (older names like "iTerm" still match); default Terminal on macOS, `$TERMINAL` or the first found on Linux; any other terminal through a custom command (`{script}` placeholder, run with `sh -c`). Buttons: `>_` in each pane header, ⌥⌘T, context menu.
 
+## About
+
+"Informazioni su Glassferry" (`AboutDialog`): from the macOS app menu (custom menu bar in `lib.rs` `app_menu`: Tauri's default menus in Italian plus "Informazioni su Glassferry", "Impostazioni… ⌘,", Aiuto → "Glassferry su GitHub"; items handled by the UI arrive as the `menu` event) and from the Impostazioni dialog (Linux has no app menu). Shows version, commit and its date (`build.rs` → `GF_COMMIT`, `GF_COMMIT_DATE`), system, `ssh -V`, the MIT license (`LICENSE`, embedded), the repository (`open_repository`), "Copia informazioni" for bug reports, and the third-party components: `scripts/third-party.mjs` (run by `pnpm build`, or `pnpm third-party`) writes `src/generated/third-party.json` from `cargo tree -e normal` for the shipped targets + `cargo metadata` (license files of each crate) and `pnpm licenses list --prod`; texts deduplicated, loaded on demand as a separate chunk. Commit the regenerated file when dependencies change.
+
 ## Layout
 
 Backend (`src-tauri/src/`):
@@ -92,7 +96,7 @@ Frontend (`src/`):
 - `api.ts` — typed wrappers for every Tauri command/event (keep in sync with `lib.rs`)
 - `App.tsx` — connection state, wiring between toolbar, panes, transfers, edits and dialogs
 - `components/` — React function components only:
-  - `Toolbar` (Nuovo collegamento ⌘K, Gestisci connessioni, ⌘J, ⚙ Impostazioni ⌘,), `SettingsDialog`, `QuickConnect` (search palette), `ConnectionManager` (modal: list, form, import from ~/.ssh/config, categories, import/export file)
+  - `Toolbar` (Nuovo collegamento ⌘K, Gestisci connessioni, ⌘J, ⚙ Impostazioni ⌘,), `SettingsDialog`, `AboutDialog`, `QuickConnect` (search palette), `ConnectionManager` (modal: list, form, import from ~/.ssh/config, categories, import/export file)
   - `FilePane` (generic virtualized pane: keyboard, context menu, inline rename, drag & drop with `acceptsFrom`, `transferTargets` for ⇧F5; `color` = category border), `RemotePane` (name + category badge, open in other pane, close), `SplitView` (draggable dividers), `ContextMenu`
   - `BottomPanel` (tabs Log / Trasferimenti / File aperti, ⌘J), `TransfersView`, `EditsView`
   - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `EditConfirmDialog`, `PlanDialog` (previewed operations), `Protection` (`ProtectionBanner`, `NameGate`, `CommandPreview`), `Dialogs` (`PromptDialog`, `ConfirmDialog`, `ChooseDialog`, `nameError`)
@@ -104,6 +108,7 @@ Frontend (`src/`):
 Other:
 - `src-tauri/icons/icon.svg` — icon source; regenerate every size with `pnpm tauri icon <1024 px png>` (drop the android/ios outputs)
 - `.github/workflows/` — `ci.yml` (build, vitest, cargo test, clippy `-D warnings` on macOS and Ubuntu 22.04), `release.yml` (tag `vX.Y.Z` = version in `tauri.conf.json` → draft release with `.dmg` arm64/x64, AppImage, `.deb`, `.rpm` for Linux x64 and arm64; macOS signed ad-hoc, not notarized; run by hand = build only, bundles as workflow artifacts)
+- `scripts/third-party.mjs` — third-party components and licenses for the About dialog (`src/generated/third-party.json`)
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `gf-local`, `gf-sftponly`, `gf-rc`, `gf-slow`); `scripts/delay-relay.py` adds latency for `gf-slow`
 - `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/linux-test.md` — checklist for testing the Linux packages; `docs/connections.md` — design of connection management and multiple remote panes (all four phases implemented)
 

@@ -4,6 +4,7 @@ import {
   askpassRespond,
   fsMkdir,
   openTerminal,
+  onMenu,
   fsAttrs,
   fsDirSize,
   fsMove,
@@ -33,6 +34,7 @@ import { EditConflictDialog } from "./components/EditConflictDialog";
 import { FilePane, type PaneOps } from "./components/FilePane";
 import { QuickConnect } from "./components/QuickConnect";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { AboutDialog } from "./components/AboutDialog";
 import { RemotePane } from "./components/RemotePane";
 import type { PaneBookmarks } from "./components/FilePane";
 import { SplitView } from "./components/SplitView";
@@ -59,6 +61,7 @@ import "./App.css";
 type Modal =
   | { kind: "quick" }
   | { kind: "settings" }
+  | { kind: "about" }
   | { kind: "manager"; startWithImport: boolean }
   /** Both remote panes are in use: which one does `connection` replace? */
   | { kind: "replace"; connection: Connection; startPath?: string; only?: number }
@@ -182,6 +185,14 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // macOS menu bar: "Informazioni su Glassferry", "Impostazioni…".
+  useEffect(() => {
+    const unlisten = onMenu((id) => {
+      if (id === "about" || id === "settings") setModal({ kind: id });
+    });
+    return () => void unlisten.then((fn) => fn());
+  }, []);
 
   useEffect(() => {
     localHome().then(setHome, () => setHome("/"));
@@ -530,7 +541,10 @@ export default function App() {
           onResize={setPanelHeight}
         />
       </div>
-      {modal?.kind === "settings" && <SettingsDialog onClose={() => setModal(null)} />}
+      {modal?.kind === "settings" && (
+        <SettingsDialog onClose={() => setModal(null)} onAbout={() => setModal({ kind: "about" })} />
+      )}
+      {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
       {modal?.kind === "quick" && store && (
         <QuickConnect
           store={store}

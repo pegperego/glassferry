@@ -31,10 +31,12 @@ function terminalSettings(choice: string, command: string): TerminalSettings {
 
 interface Props {
   onClose: () => void;
+  /** "Informazioni su Glassferry" (on Linux there is no app menu). */
+  onAbout: () => void;
 }
 
 /** "Impostazioni" (⌘,): settings stored by the backend. */
-export function SettingsDialog({ onClose }: Props) {
+export function SettingsDialog({ onClose, onAbout }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sshBin, setSshBin] = useState("");
   const [terminal, setTerminal] = useState(AUTO);
@@ -150,6 +152,9 @@ export function SettingsDialog({ onClose }: Props) {
         )}
         {error && <p className="error-text small">{error}</p>}
         <div className="actions">
+          <button type="button" className="inline link about-link" onClick={onAbout}>
+            Informazioni su Glassferry
+          </button>
           <button type="button" onClick={onClose}>
             Annulla
           </button>

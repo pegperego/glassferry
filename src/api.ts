@@ -101,6 +101,26 @@ export interface Bookmark {
 
 export const listHosts = () => invoke<HostEntry[]>("list_hosts");
 
+export interface AppInfo {
+  name: string;
+  version: string;
+  /** Short hash and date of the commit built; null outside a git checkout. */
+  commit: string | null;
+  commitDate: string | null;
+  os: string;
+  arch: string;
+  repository: string;
+  license: string;
+  licenseText: string;
+}
+
+export const appInfo = () => invoke<AppInfo>("app_info");
+export const openRepository = () => invoke<void>("open_repository");
+
+/** macOS menu items handled by the UI: "about", "settings". */
+export const onMenu = (handler: (id: string) => void): Promise<UnlistenFn> =>
+  listen<string>("menu", (event) => handler(event.payload));
+
 /** Settings the backend needs (`settings.json`); UI preferences stay in localStorage. */
 export interface Settings {
   /** Absolute path; null: /usr/bin/ssh. */

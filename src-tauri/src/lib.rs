@@ -109,6 +109,108 @@ struct ConnectionsLoad {
     warning: Option<String>,
 }
 
+const REPOSITORY_URL: &str = "https://github.com/pegperego/glassferry";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    name: &'static str,
+    version: &'static str,
+    /// Short hash and date of the commit built; absent outside a git checkout.
+    commit: Option<&'static str>,
+    commit_date: Option<&'static str>,
+    os: &'static str,
+    arch: &'static str,
+    repository: &'static str,
+    license: &'static str,
+    license_text: &'static str,
+}
+
+/// For the "Informazioni" dialog.
+#[tauri::command]
+fn app_info() -> AppInfo {
+    AppInfo {
+        name: "Glassferry",
+        version: env!("CARGO_PKG_VERSION"),
+        commit: option_env!("GF_COMMIT"),
+        commit_date: option_env!("GF_COMMIT_DATE"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        repository: REPOSITORY_URL,
+        license: env!("CARGO_PKG_LICENSE"),
+        license_text: include_str!("../../LICENSE"),
+    }
+}
+
+/// Opens the project's repository (or a page of it) in the browser.
+#[tauri::command]
+fn open_repository(app: tauri::AppHandle) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(REPOSITORY_URL, None::<&str>)
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// The macOS menu bar: Tauri's default menus, plus "Informazioni su
+/// Glassferry" and "Impostazioni…" in the app menu and the repository in Aiuto.
+#[cfg(target_os = "macos")]
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as P, Submenu};
+    let sep = || P::separator(app);
+    let app_menu = Submenu::with_items(
+        app,
+        "Glassferry",
+        true,
+        &[
+            &MenuItem::with_id(app, "about", "Informazioni su Glassferry", true, None::<&str>)?,
+            &sep()?,
+            &MenuItem::with_id(app, "settings", "Impostazioni…", true, Some("CmdOrCtrl+,"))?,
+            &sep()?,
+            &P::services(app, Some("Servizi"))?,
+            &sep()?,
+            &P::hide(app, Some("Nascondi Glassferry"))?,
+            &P::hide_others(app, Some("Nascondi altre"))?,
+            &P::show_all(app, Some("Mostra tutte"))?,
+            &sep()?,
+            &P::quit(app, Some("Esci da Glassferry"))?,
+        ],
+    )?;
+    // Needed for ⌘C/⌘V/⌘Z in text fields; the panes handle ⌘A themselves.
+    let edit = Submenu::with_items(
+        app,
+        "Modifica",
+        true,
+        &[
+            &P::undo(app, Some("Annulla"))?,
+            &P::redo(app, Some("Ripeti"))?,
+            &sep()?,
+            &P::cut(app, Some("Taglia"))?,
+            &P::copy(app, Some("Copia"))?,
+            &P::paste(app, Some("Incolla"))?,
+            &P::select_all(app, Some("Seleziona tutto"))?,
+        ],
+    )?;
+    let window = Submenu::with_items(
+        app,
+        "Finestra",
+        true,
+        &[
+            &P::minimize(app, Some("Contrai"))?,
+            &P::maximize(app, Some("Zoom"))?,
+            &P::fullscreen(app, Some("Schermo intero"))?,
+            &sep()?,
+            &P::close_window(app, Some("Chiudi finestra"))?,
+        ],
+    )?;
+    let help = Submenu::with_items(
+        app,
+        "Aiuto",
+        true,
+        &[&MenuItem::with_id(app, "repository", "Glassferry su GitHub", true, None::<&str>)?],
+    )?;
+    Menu::with_items(app, &[&app_menu, &edit, &window, &help])
+}
+
 #[tauri::command]
 fn settings_load(state: State<'_, AppState>) -> settings::Settings {
     state.settings.lock().unwrap().clone()
@@ -581,9 +683,22 @@ pub fn run() {
         std::process::exit(code);
     }
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(app_menu).on_menu_event(|app, event| match event.id().as_ref() {
+        // The UI opens its dialogs; the repository opens in the browser.
+        id @ ("about" | "settings") => {
+            let _ = app.emit("menu", id);
+        }
+        "repository" => {
+            use tauri_plugin_opener::OpenerExt;
+            let _ = app.opener().open_url(REPOSITORY_URL, None::<&str>);
+        }
+        _ => {}
+    });
+    let app = builder
         .setup(|app| {
             let runtime_dir = runtime_dir::create()?;
             let handle = app.handle().clone();
@@ -659,6 +774,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_hosts,
+            app_info,
+            open_repository,
             settings_load,
             settings_save,
             ssh_check,

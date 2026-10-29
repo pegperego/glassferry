@@ -1724,3 +1724,38 @@ button.link {
 .actions .about-link {
   margin-right: auto;
 }
+
+.search-dialog {
+  width: min(680px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-results {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+  max-height: 50vh;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.search-result {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result:hover {
+  background: var(--bg-alt);
+}

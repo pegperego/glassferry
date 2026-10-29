@@ -10,6 +10,7 @@ pub mod ids;
 pub mod local;
 pub mod log;
 pub mod plan;
+pub mod search;
 pub mod runtime_dir;
 pub mod session;
 pub mod settings;
@@ -52,6 +53,8 @@ struct AppState {
     connections_warning: Mutex<Option<String>>,
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<u64, OpenSession>>,
+    /// Running searches, by the id the UI gave them.
+    searches: Mutex<HashMap<u64, Arc<search::Cancel>>>,
 }
 
 struct OpenSession {
@@ -577,6 +580,35 @@ async fn fs_dir_size(state: State<'_, AppState>, target: Target, dir: String, na
     }
 }
 
+/// Files below `dir` whose name matches; `search_id` lets the UI cancel it.
+#[tauri::command]
+async fn fs_search(
+    state: State<'_, AppState>,
+    target: Target,
+    dir: String,
+    query: search::SearchQuery,
+    search_id: u64,
+) -> Result<search::SearchResult> {
+    let cancel = Arc::new(search::Cancel::default());
+    state.searches.lock().unwrap().insert(search_id, cancel.clone());
+    let result = match target {
+        Target::Local => search::local::search(&state.logger, &dir, &query, cancel).await,
+        Target::Remote { session_id } => match state.session(session_id) {
+            Ok(session) => search::remote::search(&session, &dir, &query, &cancel).await,
+            Err(e) => Err(e),
+        },
+    };
+    state.searches.lock().unwrap().remove(&search_id);
+    result
+}
+
+#[tauri::command]
+fn fs_search_cancel(state: State<'_, AppState>, search_id: u64) {
+    if let Some(cancel) = state.searches.lock().unwrap().get(&search_id) {
+        cancel.cancel();
+    }
+}
+
 /// Prepares a delete, move or rename and returns its preview.
 #[tauri::command]
 async fn fs_plan(state: State<'_, AppState>, target: Target, request: PlanRequest) -> Result<PlanPreview> {
@@ -769,6 +801,7 @@ pub fn run() {
                 connections_warning: Mutex::new(connections_warning),
                 next_session_id: AtomicU64::new(1),
                 sessions: Mutex::new(HashMap::new()),
+                searches: Mutex::new(HashMap::new()),
             });
             Ok(())
         })
@@ -809,6 +842,8 @@ pub fn run() {
             fs_delete,
             fs_attrs,
             fs_dir_size,
+            fs_search,
+            fs_search_cancel,
             fs_plan,
             fs_plan_execute,
             fs_plan_discard,

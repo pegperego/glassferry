@@ -7,6 +7,8 @@ import {
   onMenu,
   fsAttrs,
   fsDirSize,
+  fsSearch,
+  fsSearchCancel,
   fsMove,
   fsPlan,
   fsPlanDiscard,
@@ -83,6 +85,8 @@ function paneOps(target: Target, protection: Protection | null, can: { shell: bo
     openTerminal: can.shell ? (dir) => openTerminal(target, dir) : null,
     attrs: (dir, names, change, dryRun) => fsAttrs(target, dir, names, change, dryRun),
     dirSize: (dir, names) => fsDirSize(target, dir, names),
+    search: (dir, query, id) => fsSearch(target, dir, query, id),
+    cancelSearch: (id) => void fsSearchCancel(id).catch(() => {}),
     canChown: can.chown,
   };
 }

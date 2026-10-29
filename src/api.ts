@@ -341,6 +341,29 @@ export interface DirSize {
 export const fsDirSize = (target: Target, dir: string, names: string[]) =>
   invoke<DirSize[]>("fs_dir_size", { target, dir, names });
 
+export type SearchKind = "any" | "file" | "dir";
+
+export interface SearchQuery {
+  /** Part of the name, or a pattern with `*` and `?`. */
+  text: string;
+  kind: SearchKind;
+}
+
+export interface SearchResult {
+  matches: { path: string; dir: boolean }[];
+  /** More than 1000 matches, or the walk stopped at its folder limit. */
+  truncated: boolean;
+  /** Some folders could not be read. */
+  partial: boolean;
+  method: "find" | "sftp" | "local";
+}
+
+/** Names matching below `dir`; `searchId` (chosen by the caller) cancels it. */
+export const fsSearch = (target: Target, dir: string, query: SearchQuery, searchId: number) =>
+  invoke<SearchResult>("fs_search", { target, dir, query, searchId });
+
+export const fsSearchCancel = (searchId: number) => invoke<void>("fs_search_cancel", { searchId });
+
 /** Opens the system terminal in `path` (remote: a new ssh connection that changes to it). */
 export const openTerminal = (target: Target, path: string) => invoke<void>("open_terminal", { target, path });
 

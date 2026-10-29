@@ -9,7 +9,13 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { isDirLike, type AttrChange, type DirSize, type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
+import {
+  isDirLike,
+  type AttrChange,
+  type DirSize,
+  type SearchQuery,
+  type SearchResult,
+  type FileEntry, type PlanOutcome, type PlanPreview, type PlanRequest } from "../api";
 import type { Protection } from "../connections";
 import { clickSelect, emptySelection, moveCursor, selectAll, toggleSort, type SortKey } from "../fileList";
 import { formatOwner, formatPermissions, formatSize, formatTime, ownerTitle } from "../format";
@@ -20,6 +26,7 @@ import type { PaneState } from "../usePane";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { PromptDialog, nameError } from "./Dialogs";
 import { PermissionsDialog } from "./PermissionsDialog";
+import { SearchDialog } from "./SearchDialog";
 import { PlanDialog } from "./PlanDialog";
 
 const ROW_HEIGHT = 24;
@@ -46,6 +53,8 @@ export interface PaneOps {
   /** Owner and group can change (remote account with chown/chgrp). */
   canChown: boolean;
   dirSize: (dir: string, names: string[]) => Promise<DirSize[]>;
+  search: (dir: string, query: SearchQuery, id: number) => Promise<SearchResult>;
+  cancelSearch: (id: number) => void;
 }
 
 /** Bookmarks of the pane's connection (or of local folders). */
@@ -84,6 +93,7 @@ interface Props {
 
 type Dialog =
   | { kind: "mkdir" }
+  | { kind: "search" }
   | { kind: "permissions"; names: string[] }
   | { kind: "move"; names: string[] }
   | {
@@ -291,6 +301,7 @@ export function FilePane(props: Props) {
     // ⌥ changes e.key on macOS (⌥T = †): match the physical key.
     else if (e.code === "KeyT" && e.metaKey && e.altKey) terminalAt(path);
     else if (e.key.toLowerCase() === "d" && e.metaKey && bookmarks && path) bookmarks.toggle(path);
+    else if (e.key.toLowerCase() === "f" && e.metaKey && path) setDialog({ kind: "search" });
     else if (e.key === "F5" && e.shiftKey && transferTargets.length > 0) {
       const chosen = selectionOrCursor();
       const rect = listRef.current?.getBoundingClientRect();
@@ -461,6 +472,9 @@ export function FilePane(props: Props) {
         <button title="Aggiorna" onClick={() => void pane.refresh()} disabled={pane.loading}>
           ⟳
         </button>
+        <button title="Cerca in questa cartella (⌘F)" disabled={path === null} onClick={() => setDialog({ kind: "search" })}>
+          ⌕
+        </button>
         {ops.openTerminal && (
           <button title="Apri nel terminale (⌥⌘T)" className="mono" disabled={path === null} onClick={() => terminalAt(path)}>
             &gt;_
@@ -574,6 +588,20 @@ export function FilePane(props: Props) {
         />
       )}
 
+      {dialog?.kind === "search" && path !== null && (
+        <SearchDialog
+          dir={path}
+          search={ops.search}
+          cancel={ops.cancelSearch}
+          onClose={() => setDialog(null)}
+          onOpen={(found, isDir) => {
+            setDialog(null);
+            // A folder opens; a file shows in its folder, under the cursor.
+            void (isDir ? pane.navigate(found) : pane.navigate(parentPath(found), found.slice(found.lastIndexOf("/") + 1)));
+            listRef.current?.focus();
+          }}
+        />
+      )}
       {dialog?.kind === "permissions" && path !== null && (
         <PermissionsDialog
           dir={path}

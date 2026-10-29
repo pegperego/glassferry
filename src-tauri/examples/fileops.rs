@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock};
 use glassferry_lib::askpass::{AskpassServer, PromptKind};
 use glassferry_lib::attrs::{self, AttrChange};
 use glassferry_lib::dirsize;
+use glassferry_lib::search::{self, Cancel, SearchKind, SearchQuery};
 use glassferry_lib::fileops::{remote, Target};
 use glassferry_lib::plan::{PlanMethod, PlanRequest, Planner};
 use glassferry_lib::log::{Logger, Status};
@@ -169,6 +170,24 @@ fn main() {
             "folder size",
             if size.approx { (500_000..700_000).contains(&size.bytes) } else { size.bytes == 500_000 } && !size.partial,
         );
+
+        // Search: find on the server, or an SFTP walk; same results.
+        std::fs::create_dir_all(format!("{work}/found/conf.d/nginx")).unwrap();
+        std::fs::write(format!("{work}/found/conf.d/Nginx.conf"), b"x").unwrap();
+        std::fs::write(format!("{work}/found/notes.txt"), b"x").unwrap();
+        let query = SearchQuery { text: "nginx".into(), kind: SearchKind::Any };
+        let found = search::remote::search(&session, &format!("{work}/found"), &query, &Cancel::default()).await.unwrap();
+        let mut paths: Vec<String> = found.matches.iter().map(|m| format!("{}{}", m.path.replace(&work, ""), if m.dir { "/" } else { "" })).collect();
+        paths.sort();
+        println!("search via {}: {paths:?}", found.method);
+        check(
+            "search by name",
+            paths == ["/found/conf.d/Nginx.conf", "/found/conf.d/nginx/"]
+                && found.method == if session.capabilities.commands.iter().any(|c| c == "find") { "find" } else { "sftp" },
+        );
+        let files = SearchQuery { text: "*.conf".into(), kind: SearchKind::File };
+        let found = search::remote::search(&session, &format!("{work}/found"), &files, &Cancel::default()).await.unwrap();
+        check("search files only", found.matches.len() == 1 && !found.matches[0].dir);
 
         session.close().await;
         let _ = std::fs::remove_dir_all(&work);

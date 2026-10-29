@@ -81,6 +81,7 @@ Further reading:
 - [`CLAUDE.md`](CLAUDE.md): architecture, modules and test commands, including a local test sshd.
 - [`docs/architecture.md`](docs/architecture.md): design decisions and why they were taken.
 - [`docs/roadmap.md`](docs/roadmap.md): planned and proposed work.
+- [`CHANGELOG.md`](CHANGELOG.md): what changed in each release.
 
 ## License
 

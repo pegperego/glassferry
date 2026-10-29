@@ -1,7 +1,8 @@
 # Builds Glassferry for macOS (arm64, x64) and Linux (x64, arm64).
 #
-# - Push a tag vX.Y.Z (equal to the version in tauri.conf.json): the bundles
-#   are attached to a draft GitHub release, published by hand after a check.
+# - Push a tag vX.Y.Z (equal to the version in tauri.conf.json, with a
+#   section in CHANGELOG.md that becomes the release text): the bundles are
+#   attached to a draft GitHub release, published by hand after a check.
 # - Run it by hand (workflow_dispatch): build only, bundles kept as workflow
 #   artifacts.
 #
@@ -73,6 +74,26 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/')
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The section of this version, without its heading.
+          awk -v v="$version" '
+            /^## \[/ { found = index($0, "[" v "]") > 0; next }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "No section for $version in CHANGELOG.md" >&2
+            exit 1
+          fi
+          {
+            echo "body<<GF_NOTES_EOF"
+            cat notes.md
+            echo "GF_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,11 +103,7 @@ jobs:
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: Glassferry __VERSION__
           releaseDraft: true
-          releaseBody: |
-            macOS builds are not notarized yet. On first launch macOS refuses to open the app: go to System Settings → Privacy & Security and click "Open Anyway", or run
-            `xattr -dr com.apple.quarantine /Applications/Glassferry.app`
-
-            The interface is in Italian for now.
+          releaseBody: ${{ steps.notes.outputs.body }}
 
       - uses: actions/upload-artifact@v4
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}

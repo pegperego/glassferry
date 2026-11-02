@@ -9,9 +9,8 @@
 //! The terminal runs a one-shot script written to the private runtime dir
 //! (it removes itself). The terminals the app knows (`KNOWN`) are detected
 //! where they are installed and started the way each one runs a program:
-//! `open -a` for Terminal and iTerm2 (they run a `.command` file, no
-//! automation permission needed), `open -na ... --args -e` for Ghostty,
-//! the bundled binary for WezTerm, kitty, Alacritty, the command in the PATH
+//! `open -a` for Terminal, iTerm2 and Ghostty (they run a `.command` file,
+//! no automation permission needed), the bundled binary for WezTerm, kitty, Alacritty, the command in the PATH
 //! on Linux. Any other terminal: a custom command with `{script}`.
 
 use std::path::{Path, PathBuf};
@@ -30,9 +29,9 @@ pub const PLACEHOLDER: &str = "{script}";
 #[derive(Clone, Copy)]
 enum Start {
     /// `open -a <app> <script>`: the app opens the `.command` file.
+    /// Ghostty too: `open -na Ghostty.app --args -e` would start a second
+    /// instance, which restores the saved windows and tabs of the first one.
     OpenFile,
-    /// `open -na <app> --args <args> <script>`.
-    OpenArgs(&'static [&'static str]),
     /// `<program> <args> <script>`: the binary inside the bundle (macOS)
     /// or the command in the PATH (Linux).
     Exec(&'static [&'static str]),
@@ -52,7 +51,7 @@ struct Known {
 const KNOWN: &[Known] = &[
     Known { id: "terminal", name: "Terminal", install: "Terminal.app", binary: "", start: Start::OpenFile },
     Known { id: "iterm", name: "iTerm2", install: "iTerm.app", binary: "", start: Start::OpenFile },
-    Known { id: "ghostty", name: "Ghostty", install: "Ghostty.app", binary: "", start: Start::OpenArgs(&["-e"]) },
+    Known { id: "ghostty", name: "Ghostty", install: "Ghostty.app", binary: "", start: Start::OpenFile },
     Known { id: "wezterm", name: "WezTerm", install: "WezTerm.app", binary: "Contents/MacOS/wezterm", start: Start::Exec(&["start", "--"]) },
     Known { id: "kitty", name: "kitty", install: "kitty.app", binary: "Contents/MacOS/kitty", start: Start::Exec(&[]) },
     Known { id: "alacritty", name: "Alacritty", install: "Alacritty.app", binary: "Contents/MacOS/alacritty", start: Start::Exec(&["-e"]) },
@@ -230,18 +229,9 @@ async fn launch(settings: &TerminalSettings, script: &Path) -> Result<String> {
     let Some(location) = locate(known) else {
         return Err(AppError::Other(format!("{} non è installato: scegli un altro terminale nelle Impostazioni", known.name)));
     };
-    let location_arg = location.to_string_lossy().into_owned();
     match known.start {
-        Start::OpenFile | Start::OpenArgs(_) => {
-            let mut args: Vec<String> = match known.start {
-                Start::OpenArgs(extra) => {
-                    let mut args = vec!["-na".to_string(), location_arg.clone(), "--args".into()];
-                    args.extend(extra.iter().map(|a| a.to_string()));
-                    args
-                }
-                _ => vec!["-a".to_string(), location_arg.clone()],
-            };
-            args.push(script_arg.clone());
+        Start::OpenFile => {
+            let args = vec!["-a".to_string(), location.to_string_lossy().into_owned(), script_arg];
             let output = Command::new("open").args(&args).output().await?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);

@@ -85,22 +85,46 @@ fn info(update: &Update) -> UpdateInfo {
     }
 }
 
+/// What a failed check means, in words: the plugin's errors are generic
+/// ("Could not fetch a valid release JSON from the remote" is any non-2xx
+/// answer, e.g. a release without `latest.json`).
+fn check_error_message(error: &tauri_plugin_updater::Error) -> String {
+    use tauri_plugin_updater::Error as E;
+    match error {
+        E::ReleaseNotFound => "l'ultima release su GitHub non contiene le informazioni per l'aggiornamento automatico: \
+                               le nuove versioni si scaricano dalla pagina delle release"
+            .into(),
+        E::Reqwest(_) => "GitHub non è raggiungibile: controlla la connessione e riprova".into(),
+        E::TargetNotFound(_) | E::TargetsNotFound(_) => {
+            "l'ultima release non ha un pacchetto di aggiornamento per questo sistema".into()
+        }
+        E::Serialization(_) => "le informazioni sull'aggiornamento pubblicate su GitHub non sono valide".into(),
+        other => format!("controllo degli aggiornamenti non riuscito: {other}"),
+    }
+}
+
 impl UpdateState {
     /// Asks the endpoint for a version newer than this one.
     pub async fn check(&self, app: &AppHandle, logger: &std::sync::Arc<Logger>) -> Result<Option<UpdateInfo>> {
         let mut op = logger.start(None, Channel::Local, "update-check", ENDPOINT);
         op.equivalent(format!("curl -L {ENDPOINT}"));
-        let found = async {
-            let updater = app.updater_builder().build().map_err(|e| AppError::Other(e.to_string()))?;
-            updater.check().await.map_err(|e| AppError::Other(format!("controllo degli aggiornamenti: {e}")))
-        }
-        .await;
-        let found = op.result(found, |update| {
-            Some(match update {
-                Some(update) => format!("disponibile la {} (installata la {})", update.version, update.current_version),
-                None => format!("nessun aggiornamento (installata la {})", app.package_info().version),
-            })
-        })?;
+        let found = match app.updater_builder().build() {
+            Ok(updater) => updater.check().await,
+            Err(e) => Err(e),
+        };
+        let found = match found {
+            Ok(found) => found,
+            Err(e) => {
+                // The UI shows the explanation, the log keeps the plugin's error too.
+                let message = check_error_message(&e);
+                op.fail(format!("{message} ({e})"));
+                return Err(AppError::Other(message));
+            }
+        };
+        op.ok(Some(match &found {
+            Some(update) => format!("disponibile la {} (installata la {})", update.version, update.current_version),
+            None => format!("nessun aggiornamento (installata la {})", app.package_info().version),
+        }));
         let result = found.as_ref().map(info);
         *self.pending.lock().unwrap() = found;
         Ok(result)
@@ -156,5 +180,19 @@ impl UpdateState {
             .map_err(|e| AppError::Other(e.to_string()))
             .and_then(|r| r.map_err(|e| AppError::Other(format!("installazione dell'aggiornamento: {e}"))));
         op.result(installed, |_| Some("si attiva al riavvio".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explains_check_errors() {
+        use tauri_plugin_updater::Error as E;
+        assert!(check_error_message(&E::ReleaseNotFound).starts_with("l'ultima release su GitHub non contiene"));
+        assert!(!check_error_message(&E::ReleaseNotFound).contains("  "));
+        assert!(check_error_message(&E::TargetsNotFound(vec!["darwin-aarch64".into()])).contains("questo sistema"));
+        assert!(check_error_message(&E::EmptyEndpoints).starts_with("controllo degli aggiornamenti non riuscito"));
     }
 }

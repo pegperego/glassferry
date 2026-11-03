@@ -32,6 +32,14 @@ Sviluppo completato il 2026-10-29 (le voci sono in "Fatto"); da provare nell'app
 | Build notarizzata per macOS | da fare | 2026-10-27 | Distribuzione fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh`. Manca l'account Apple Developer (99 $/anno): intanto le build sono firmate ad-hoc; poi basta aggiungere i secret a `release.yml` |
 | Trascinare file dall'app al Finder | proposta | 2026-10-27 | Non supportato da Tauri: serve un plugin e, per i remoti, le file promise di macOS. La voce più costosa, per questo in fondo |
 
+## Wave 5 — Osservare i server (1.1)
+
+Strumenti per seguire quello che succede su un server mentre ci si lavora. Wave decisa il 2026-11-03.
+
+| Voce | Stato | Proposta il | Note |
+|---|---|---|---|
+| Seguire un file (tail) | da fare | 2026-11-03 | Guardare crescere un log senza aprire un terminale. Design in [`architecture.md`](architecture.md) §18: `tail -F` quando c'è la shell (e in locale), altrimenti lettura via SFTP a intervalli; finestra in sovraimpressione bloccante (aprirla avvia, chiuderla ferma: nessun tail dimenticato), un file alla volta, filtro con espressioni regolari, anche per i file locali |
+
 ## Da collocare
 
 Voci nuove in attesa di una wave, e voci rimandate.

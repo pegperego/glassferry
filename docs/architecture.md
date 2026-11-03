@@ -177,3 +177,18 @@ Prima del 2026-10-28 l'app si chiamava "SSH File Manager" (cartelle e servizio d
 (2026-10-29) Il dialogo "Informazioni su Glassferry" mostra versione, commit, sistema, `ssh -V`, licenza e componenti di terze parti, e copia questi dati per le segnalazioni. Su macOS si apre dal menu dell'app, come negli altri programmi; su Linux, che non ha un menu dell'app, dalle Impostazioni.
 
 L'elenco dei componenti è generato a ogni build (`scripts/third-party.mjs`), non scritto a mano: le licenze MIT, BSD e Apache chiedono di riportare l'avviso di copyright nelle copie distribuite, e con quasi 400 dipendenze un elenco manuale sarebbe sempre incompleto. Si considerano solo i componenti che finiscono nell'app (dipendenze normali delle piattaforme distribuite, pacchetti npm di produzione), con il testo della licenza preso dai file del pacchetto. I testi uguali sono salvati una volta sola; il file è caricato solo quando si apre l'elenco.
+
+## 18. Seguire un file (tail)
+
+(2026-11-03, da realizzare, wave 5) Mostrare le righe nuove di un file mentre cresce, remoto o locale.
+
+**Due percorsi, come la ricerca e la dimensione delle cartelle.** Con la shell e `tail` nel probe: `tail -n <N> -F -- "$1"` tramite `sh_command`, un exec che resta aperto; i dati arrivano in tempo reale e la rotazione è riconosciuta dall'inode. In locale lo stesso comando con il `tail` del sistema. Su un account solo SFTP: all'apertura le ultime N righe (lette a blocchi dalla fine, mai il file intero), poi `stat` a intervalli e lettura dei soli byte nuovi, con intervallo adattivo (circa 500 ms quando il file cresce, fino a qualche secondo quando è fermo). Il percorso SFTP imita `tail -F`: dimensione che cala = troncamento (riparte dall'inizio), primi byte cambiati = rotazione (SFTP v3 non dà l'inode, si confronta un'impronta del primo blocco), file sparito = attesa che ricompaia. Entrambi producono gli stessi eventi (righe, stato), l'interfaccia non sa quale percorso è in uso. Una variabile d'ambiente forza il ripiego SFTP per le prove (`gf-local` / `gf-sftponly`), come `GF_COPY_STRATEGY`.
+
+**Ripresa.** Si contano i byte ricevuti: dopo una disconnessione la lettura riparte da lì (`tail -c +<offset+1> -F`, o lettura SFTP dall'offset), senza righe doppie.
+
+**Finestra in sovraimpressione bloccante.** Aprirla avvia la lettura, chiuderla (Esc, ✕) la ferma: nessun tail dimenticato in background che tiene occupata una sessione. Un file alla volta; i trasferimenti continuano nel frattempo e riaprire costa poco (ultime N righe). Le richieste di password e i conflitti devono comparire sopra. Comandi: pausa, scorrimento automatico che si sospende scorrendo in su, filtro con espressione regolare (evidenziata, errore se non valida), a capo automatico, copia. Al massimo circa 10.000 righe in memoria; righe incomplete tenute finché arriva l'a capo, righe molto lunghe tagliate, testo decodificato in modo tollerante e contenuto binario segnalato.
+
+**Log.** Il percorso con la shell è una sola voce con la riga di comando esatta. Il percorso SFTP è un'eccezione alla regola "ogni richiesta nel log" (un controllo al secondo lo riempirebbe): si registrano avvio, arresto con riepilogo (byte letti, richieste), errori, troncamenti e rotazioni, con equivalente `tail -n <N> -F <file>`.
+
+Fuori dalla prima versione: più file uniti in una vista, file compressi, seguire una cartella o un pattern.
+

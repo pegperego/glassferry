@@ -121,6 +121,7 @@ Frontend (`src/`):
 Other:
 - `src-tauri/icons/icon.svg` — icon source; regenerate every size with `pnpm tauri icon <1024 px png>` (drop the android/ios outputs)
 - `.github/workflows/` — `ci.yml` (build, vitest, cargo test, clippy `-D warnings` on macOS and Ubuntu 22.04), `release.yml` (packages and `latest.json` signed with the updater key; tag `vX.Y.Z` = version in `tauri.conf.json`, `package.json` and `Cargo.toml`, release text = that version's section of `CHANGELOG.md` → draft release with `.dmg` arm64/x64, AppImage, `.deb`, `.rpm` for Linux x64 and arm64; macOS signed ad-hoc, not notarized; run by hand = build only, bundles as workflow artifacts)
+- `scripts/updater-json.mjs` — writes `latest.json` from the release's `.sig` assets (job `updater-json` in `release.yml`, after all builds: tauri-action's own file races across the matrix)
 - `scripts/third-party.mjs` — third-party components and licenses for the About dialog (`src/generated/third-party.json`)
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `gf-local`, `gf-sftponly`, `gf-rc`, `gf-slow`); `scripts/delay-relay.py` adds latency for `gf-slow`
 - `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/linux-test.md` — checklist for testing the Linux packages; `docs/connections.md` — design of connection management and multiple remote panes (all four phases implemented)

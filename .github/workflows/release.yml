@@ -11,9 +11,9 @@
 #
 # Updates: every package is also signed with the updater key (minisign,
 # secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD;
-# the public key is in tauri.conf.json) and tauri-action attaches latest.json,
-# which the installed apps read from the latest published release (see
-# src-tauri/src/update.rs). Without the secrets the build fails.
+# the public key is in tauri.conf.json). The updater-json job then attaches
+# latest.json, which the installed apps read from the latest published release
+# (see src-tauri/src/update.rs). Without the secrets the build fails.
 name: Release
 
 on:
@@ -112,8 +112,9 @@ jobs:
           releaseName: Glassferry __VERSION__
           releaseDraft: true
           releaseBody: ${{ steps.notes.outputs.body }}
-          # latest.json for the updater (merged across the matrix jobs).
-          includeUpdaterJson: true
+          # Written once by the updater-json job: the matrix jobs would race
+          # rewriting it and only one platform would survive.
+          includeUpdaterJson: false
 
       - uses: actions/upload-artifact@v4
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -127,3 +128,25 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
           if-no-files-found: error
+
+  # latest.json for the updater, from the signatures every build uploaded.
+  updater-json:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write and attach latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir sigs
+          gh release download "$GITHUB_REF_NAME" --pattern '*.sig' --dir sigs
+          awk -v v="$version" '
+            /^## \[/ { found = index($0, "[" v "]") > 0; next }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          node scripts/updater-json.mjs "$version" sigs notes.md > latest.json
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber

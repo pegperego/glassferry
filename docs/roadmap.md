@@ -29,6 +29,7 @@ Sviluppo completato il 2026-10-29 (le voci sono in "Fatto"); da provare nell'app
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
 | Interfaccia in inglese | proposta | 2026-10-27 | Oggi i testi sono solo in italiano, un limite ora che il repository è pubblico: candidata ad anticipare alla wave 2 |
+| Firma con un certificato autofirmato stabile | proposta | 2026-11-03 | Con la firma ad-hoc, dopo ogni aggiornamento macOS chiede la password del Portachiavi per le password salvate (provato con 0.4.0 → 0.5.0). Un certificato di firma del codice autofirmato, sempre lo stesso (secret della workflow), rende stabile l'identità dell'app per il Portachiavi senza costi. Gatekeeper continua a bloccare il primo avvio; superata dalla build notarizzata quando ci sarà l'account. Al passaggio il Portachiavi chiede ancora una volta |
 | Build notarizzata per macOS | da fare | 2026-10-27 | Distribuzione fuori dal Mac App Store: la sandbox impedirebbe di avviare `ssh`. Manca l'account Apple Developer (99 $/anno): intanto le build sono firmate ad-hoc; poi basta aggiungere i secret a `release.yml` |
 | Trascinare file dall'app al Finder | proposta | 2026-10-27 | Non supportato da Tauri: serve un plugin e, per i remoti, le file promise di macOS. La voce più costosa, per questo in fondo |
 

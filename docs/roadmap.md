@@ -36,9 +36,7 @@ Sviluppo completato il 2026-10-29 (le voci sono in "Fatto"); da provare nell'app
 
 Strumenti per seguire quello che succede su un server mentre ci si lavora. Wave decisa il 2026-11-03.
 
-| Voce | Stato | Proposta il | Note |
-|---|---|---|---|
-| Seguire un file (tail) | da fare | 2026-11-03 | Guardare crescere un log senza aprire un terminale. Design in [`architecture.md`](architecture.md) §18: `tail -F` quando c'è la shell (e in locale), altrimenti lettura via SFTP a intervalli; finestra in sovraimpressione bloccante (aprirla avvia, chiuderla ferma: nessun tail dimenticato), un file alla volta, filtro con espressioni regolari, anche per i file locali |
+Sviluppo completato il 2026-11-03 (le voci sono in "Fatto"); da provare nell'app.
 
 ## Da collocare
 
@@ -97,3 +95,4 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | Differenze riga per riga nel conflitto di modifica | `52ac2a9` |
 | App di modifica dei file remoti per estensione (Impostazioni) | `709fae1` |
 | Aggiornamenti automatici con pacchetti firmati (provato su macOS il 2026-11-03: 0.3.0 di prova → 0.4.0) | `c641d4c`, `80e1893` |
+| Seguire un file (tail): `tail -F` con la shell e in locale, lettura via SFTP senza, finestra bloccante con filtro regex | `466ab36` |

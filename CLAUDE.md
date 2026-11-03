@@ -124,7 +124,7 @@ Other:
 - `scripts/updater-json.mjs` — writes `latest.json` from the release's `.sig` assets (job `updater-json` in `release.yml`, after all builds: tauri-action's own file races across the matrix)
 - `scripts/third-party.mjs` — third-party components and licenses for the About dialog (`src/generated/third-party.json`)
 - `scripts/test-sshd.sh` — local unprivileged sshd fixture (hosts `gf-local`, `gf-sftponly`, `gf-rc`, `gf-slow`); `scripts/delay-relay.py` adds latency for `gf-slow`
-- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/linux-test.md` — checklist for testing the Linux packages; `docs/connections.md` — design of connection management and multiple remote panes (all four phases implemented)
+- `docs/architecture.md` — design decisions and their reasons; `docs/roadmap.md` — future work; `docs/linux-test.md` — checklist for testing the Linux packages; `docs/connections.md` — design of connection management and multiple remote panes (all four phases implemented); `docs/windows.md` — Windows support analysis (no ControlMaster in Microsoft's OpenSSH: SFTP-only sessions, phases)
 
 ## Commands
 
@@ -141,7 +141,7 @@ scripts/test-sshd.sh stop
 
 ## Conventions
 
-- Rust: errors through `AppError` (serialized as a string to the UI); async with Tokio via `tauri::async_runtime`; Unix-only code is fine (Windows is out of scope for now).
+- Rust: errors through `AppError` (serialized as a string to the UI); async with Tokio via `tauri::async_runtime`; Unix-only code is fine for now; Windows support is planned (`docs/windows.md`): keep platform-specific code isolated so it can be gated with `cfg`.
 - TypeScript strict; function components and hooks only; domain logic in plain TS modules, not in components.
 - UI text in Italian for now; code, comments and identifiers in English.
 - Monospace font everywhere (`--mono` in `App.css`): values must line up across panes.

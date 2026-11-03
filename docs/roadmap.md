@@ -46,6 +46,7 @@ Voci nuove in attesa di una wave, e voci rimandate.
 
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
+| Supporto per Windows | da fare | 2026-11-03 | Tolto dal fuori scope il 2026-11-03. L'OpenSSH di Microsoft non ha il ControlMaster: sessione in modalità solo SFTP, master quando l'ssh scelto lo supporta (Git for Windows, WSL). Analisi e fasi in [`windows.md`](windows.md); si comincia con una prova di fattibilità su VM. Wave da decidere |
 | Prova con configurazioni ssh complesse | rimandata | 2026-10-27 | ProxyJump, 1Password (`IdentityAgent`), 2FA/TOTP, `Match`: non presenti nel config usato per la prova sul campo. Rimandata il 2026-10-28 (dalla wave 1): servono configurazioni e server che ora non sono disponibili |
 | Prova dei pacchetti Linux (AppImage / deb / rpm, x64 e arm64) | rimandata | 2026-10-27 | Prodotti da `release.yml` (arm64 aggiunto il 2026-10-28, per provarli in una VM su Mac Apple silicon); checklist in [`linux-test.md`](linux-test.md). Da provare anche l'aggiornamento automatico (AppImage riscritta, `.deb`/`.rpm` con pkexec). Rimandata il 2026-10-28 (dalla wave 1): serve una macchina o una VM Linux con desktop |
 
@@ -55,7 +56,6 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 
 | Voce | Motivo |
 |---|---|
-| Windows | Il codice usa ControlMaster e socket Unix; l'architettura lascia la porta aperta (un processo `ssh -s` per sessione, senza multiplexing) |
 | Integrazione File Provider con il Finder | Fuori dagli obiettivi del progetto |
 | macFUSE o altre dipendenze closed source | Requisito del progetto |
 | Installare qualcosa sui server | Requisito del progetto: si usano solo il sottosistema SFTP e, se c'è, la shell |

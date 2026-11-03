@@ -2,11 +2,23 @@
 
 Notable changes of each release. The section of a version is also the text of its GitHub release (`.github/workflows/release.yml`).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-03
 
-### Added
+### Automatic updates
 
-- Automatic updates: the app checks GitHub for a new version at start and once a day (can be turned off in Impostazioni, or checked by hand), shows the release notes and installs it after you confirm; packages are verified with the project's signing key. Restarting is a separate step, with a warning when transfers are running.
+- The app checks GitHub for a new version at start and once a day (can be turned off in Impostazioni, or checked by hand with "Controlla ora" or the menu "Controlla aggiornamenti…"), shows the release notes and installs it after you confirm. Packages are verified with the project's signing key. Restarting is a separate step, with a warning when transfers are running.
+- This is the first version with automatic updates: install it by hand (replace the app, connections and settings are kept); the next versions arrive by themselves.
+
+### Server tools
+
+- Search files by name below a folder (⌘F or ⌕ in a pane), with `*` and `?` patterns: `find` on the server, or a walk on SFTP-only accounts.
+- Compress a selection to `.tar.gz` and extract `.tar.*`, `.tgz` and `.zip` archives into a new folder ("Comprimi in .tar.gz…", "Estrai qui"), on the server or locally.
+- Edit conflicts show the differences between the server's version and yours ("Mostra le differenze"), also later from "File aperti".
+- Choose the app that edits remote files, by extension (Impostazioni → "Modifica dei file remoti").
+
+### Fixes
+
+- "Apri nel terminale" with Ghostty opens a window in the running instance instead of starting a second one.
 
 ## [0.3.0] - 2026-10-29
 

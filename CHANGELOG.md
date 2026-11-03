@@ -2,7 +2,7 @@
 
 Notable changes of each release. The section of a version is also the text of its GitHub release (`.github/workflows/release.yml`).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-03
 
 ### Added
 

@@ -2,6 +2,12 @@
 
 Notable changes of each release. The section of a version is also the text of its GitHub release (`.github/workflows/release.yml`).
 
+## [Unreleased]
+
+### Added
+
+- Follow a file as it grows ("Segui (tail)" in the context menu), remote or local: the last 500 lines, then the new ones as they arrive, with a regular expression filter, pause, wrap and copy. Uses `tail -F` on servers with a shell (and locally), SFTP polling on SFTP-only accounts; truncated, rotated and deleted files are followed like `tail -F` does. The window blocks the rest of the app: closing it stops the tail, so none is left running.
+
 ## [0.4.0] - 2026-11-03
 
 ### Automatic updates

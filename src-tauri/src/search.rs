@@ -73,11 +73,11 @@ impl Cancel {
         self.notify.notify_waiters();
     }
 
-    fn is_cancelled(&self) -> bool {
+    pub(crate) fn is_cancelled(&self) -> bool {
         self.flag.load(Ordering::Relaxed)
     }
 
-    async fn cancelled(&self) {
+    pub(crate) async fn cancelled(&self) {
         loop {
             // Created before the check: a cancel in between still wakes it.
             let notified = self.notify.notified();

@@ -22,6 +22,7 @@ Status: MVP complete. The interface is in Italian for now.
   - New folder, rename, move and delete. Never overwrites.
   - Local deletes go to the Trash; remote deletes are permanent and confirmed first.
 - **Edit remote files with your default app.** Every save is uploaded. If someone else changed the file on the server meanwhile, the app asks before overwriting.
+- **Follow a file (tail).** "Segui (tail)" in the context menu shows a log as it grows, remote or local, with a regex filter, pause and wrap: `tail -F` when the server has a shell, SFTP polling on SFTP-only accounts. Closing the window stops it.
 - **Activity log.**
   - Every ssh command, SFTP request and remote command, with its exact command line and a terminal equivalent.
   - Also kept in a rotating log file. A diagnostic mode per host adds `ssh -v` output.

@@ -18,6 +18,7 @@ pub mod session;
 pub mod settings;
 pub mod terminal;
 pub mod ssh_config;
+pub mod tail;
 pub mod transfer;
 pub mod update;
 
@@ -59,6 +60,7 @@ struct AppState {
     /// Running searches, by the id the UI gave them.
     searches: Mutex<HashMap<u64, Arc<search::Cancel>>>,
     updates: update::UpdateState,
+    tails: Arc<tail::TailManager>,
 }
 
 struct OpenSession {
@@ -452,6 +454,7 @@ async fn local_list_dir(state: State<'_, AppState>, path: String) -> Result<Vec<
 async fn disconnect(state: State<'_, AppState>, session_id: u64) -> Result<()> {
     state.transfers.cancel_session(session_id);
     state.edits.close_session(session_id);
+    state.tails.stop_session(session_id);
     let session = state.sessions.lock().unwrap().remove(&session_id).map(|open| open.session);
     if let Some(session) = session {
         match Arc::try_unwrap(session) {
@@ -659,6 +662,28 @@ async fn fs_search(
     result
 }
 
+/// Starts following a file (see `tail.rs`); lines arrive as `tail-event`.
+#[tauri::command]
+fn tail_start(
+    state: State<'_, AppState>,
+    tail_id: u64,
+    target: Target,
+    path: String,
+    lines: u32,
+    from_offset: Option<u64>,
+) -> Result<tail::TailStarted> {
+    let target = match target {
+        Target::Local => tail::TailTarget::Local,
+        Target::Remote { session_id } => tail::TailTarget::Remote(session_id, state.session(session_id)?),
+    };
+    state.tails.start(tail_id, target, path, lines.clamp(1, 10_000), from_offset)
+}
+
+#[tauri::command]
+fn tail_stop(state: State<'_, AppState>, tail_id: u64) {
+    state.tails.stop(tail_id);
+}
+
 #[tauri::command]
 fn fs_search_cancel(state: State<'_, AppState>, search_id: u64) {
     if let Some(cancel) = state.searches.lock().unwrap().get(&search_id) {
@@ -829,6 +854,13 @@ pub fn run() {
                 }),
             );
             let handle = app.handle().clone();
+            let tails = tail::TailManager::new(
+                logger.clone(),
+                Arc::new(move |event| {
+                    let _ = handle.emit("tail-event", event);
+                }),
+            );
+            let handle = app.handle().clone();
             let askpass = AskpassServer::start(
                 &runtime_dir,
                 Arc::new(move |request| {
@@ -868,6 +900,7 @@ pub fn run() {
                 sessions: Mutex::new(HashMap::new()),
                 searches: Mutex::new(HashMap::new()),
                 updates: update::UpdateState::default(),
+                tails,
             });
             Ok(())
         })
@@ -916,6 +949,8 @@ pub fn run() {
             fs_compress,
             fs_extract,
             fs_search_cancel,
+            tail_start,
+            tail_stop,
             fs_plan,
             fs_plan_execute,
             fs_plan_discard,

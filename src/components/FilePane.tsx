@@ -27,6 +27,8 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { PromptDialog, nameError } from "./Dialogs";
 import { PermissionsDialog } from "./PermissionsDialog";
 import { SearchDialog } from "./SearchDialog";
+import { TailDialog } from "./TailDialog";
+import type { TailStarter } from "../useTail";
 import { PlanDialog } from "./PlanDialog";
 
 const ROW_HEIGHT = 24;
@@ -59,6 +61,8 @@ export interface PaneOps {
   compress: ((dir: string, names: string[], archive: string) => Promise<void>) | null;
   /** For an archive name: extracts it into a new folder (resolves to its name); null when not possible. */
   extract: (name: string) => ((dir: string) => Promise<string>) | null;
+  /** Follows a file (tail): `tail -F` or SFTP polling. */
+  tail: TailStarter;
 }
 
 /** Bookmarks of the pane's connection (or of local folders). */
@@ -99,6 +103,7 @@ type Dialog =
   | { kind: "mkdir" }
   | { kind: "compress"; names: string[] }
   | { kind: "search" }
+  | { kind: "tail"; path: string }
   | { kind: "permissions"; names: string[] }
   | { kind: "move"; names: string[] }
   | {
@@ -394,6 +399,8 @@ export function FilePane(props: Props) {
       items.push({ label: "Apri nel terminale", onSelect: () => terminalAt(joinPath(path, entry.name)) });
     if (entry && !isDirLike(entry) && openFile && chosen.length === 1)
       items.push({ label: openFile.label, shortcut: "↩", onSelect: () => open(entry) });
+    if (entry && !isDirLike(entry) && entry.kind !== "other" && chosen.length === 1 && path)
+      items.push({ label: "Segui (tail)", onSelect: () => setDialog({ kind: "tail", path: joinPath(path, entry.name) }) });
     if (entry && transfer) items.push({ label: transfer.label, shortcut: "F5", onSelect: () => transfer.run(chosen) });
     if (entry && transferTargets.length > 1)
       for (const target of transferTargets) items.push({ label: target.label, onSelect: () => target.run(chosen) });
@@ -620,6 +627,17 @@ export function FilePane(props: Props) {
             setDialog(null);
             // A folder opens; a file shows in its folder, under the cursor.
             void (isDir ? pane.navigate(found) : pane.navigate(parentPath(found), found.slice(found.lastIndexOf("/") + 1)));
+            listRef.current?.focus();
+          }}
+        />
+      )}
+      {dialog?.kind === "tail" && (
+        <TailDialog
+          path={dialog.path}
+          host={title}
+          start={ops.tail}
+          onClose={() => {
+            setDialog(null);
             listRef.current?.focus();
           }}
         />

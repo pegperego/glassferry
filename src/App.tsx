@@ -11,6 +11,7 @@ import {
   fsCompress,
   fsExtract,
   fsSearchCancel,
+  tailStart,
   fsMove,
   fsPlan,
   fsPlanDiscard,
@@ -100,6 +101,7 @@ function paneOps(
     extract: (name) =>
       (name.toLowerCase().endsWith(".zip") ? can.unzip : can.tar) ? (dir) => fsExtract(target, dir, name) : null,
     cancelSearch: (id) => void fsSearchCancel(id).catch(() => {}),
+    tail: (id, path, lines, fromOffset) => tailStart(id, target, path, lines, fromOffset),
     canChown: can.chown,
   };
 }

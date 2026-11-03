@@ -398,6 +398,24 @@ export const fsSearch = (target: Target, dir: string, query: SearchQuery, search
 
 export const fsSearchCancel = (searchId: number) => invoke<void>("fs_search_cancel", { searchId });
 
+/** How a file is followed: `tail -F` (remote shell or local) or SFTP polling. */
+export type TailMethod = "tail" | "sftp";
+
+export type TailEvent =
+  /** New complete lines; `offset` is the file position after them. */
+  | { kind: "lines"; tailId: number; lines: string[]; offset: number }
+  /** Truncated, rotated, missing… */
+  | { kind: "notice"; tailId: number; message: string }
+  /** Stopped: by request (`error` null) or because of an error. */
+  | { kind: "ended"; tailId: number; offset: number; error: string | null };
+
+/** Follows `path`: its last `lines` lines, or from `fromOffset` to continue after an error. */
+export const tailStart = (tailId: number, target: Target, path: string, lines: number, fromOffset: number | null) =>
+  invoke<{ method: TailMethod }>("tail_start", { tailId, target, path, lines, fromOffset });
+export const tailStop = (tailId: number) => invoke<void>("tail_stop", { tailId });
+export const onTailEvent = (handler: (event: TailEvent) => void): Promise<UnlistenFn> =>
+  listen<TailEvent>("tail-event", (event) => handler(event.payload));
+
 /** Compresses `names` into `dir/archive` (.tar.gz); never overwrites. */
 export const fsCompress = (target: Target, dir: string, names: string[], archive: string) =>
   invoke<void>("fs_compress", { target, dir, names, archive });

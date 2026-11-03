@@ -1855,3 +1855,108 @@ button.link {
 .modal.update .progress {
   margin: 8px 0 4px;
 }
+
+/* Following a file (tail): a large blocking overlay. */
+.modal.tail {
+  width: 92vw;
+  height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.tail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tail-head h2 {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.tail-host {
+  font-weight: normal;
+  color: var(--muted);
+}
+
+.tail-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tail-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tail-filter {
+  flex: 1;
+  min-width: 0;
+}
+
+.tail-filter.invalid {
+  border-color: var(--danger);
+}
+
+.tail-filter-error {
+  margin: 0;
+}
+
+.tail-lines {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.tail-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 100%;
+  padding: 0 8px;
+  line-height: 18px;
+  white-space: pre;
+  box-sizing: border-box;
+}
+
+.tail-lines.wrap .tail-line {
+  right: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tail-line.notice {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.tail-line mark {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.tail-empty {
+  position: absolute;
+  inset: 12px;
+  margin: 0;
+}
+
+.tail-foot {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}

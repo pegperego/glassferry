@@ -22,7 +22,7 @@ use crate::log::{sftp_equivalent, shell_line, Channel, LogOp, Logger};
 
 const CONTROL_PERSIST: &str = "ControlPersist=15m";
 const PROBE_MARKER: &str = "__GF__";
-const PROBED_COMMANDS: &[&str] = &["rm", "cp", "mv", "du", "find", "sha256sum", "tar", "unzip", "chmod", "chown", "chgrp"];
+const PROBED_COMMANDS: &[&str] = &["rm", "cp", "mv", "du", "find", "sha256sum", "tar", "unzip", "chmod", "chown", "chgrp", "tail"];
 
 /// How ssh processes for one host are spawned.
 #[derive(Clone)]
@@ -194,6 +194,29 @@ impl SshLauncher {
             .kill_on_drop(true);
         let mut op = self.log(Channel::Ssh, "sftp-channel", command_line(&cmd));
         op.equivalent(shell_line(std::iter::once("sftp".to_string()).chain(self.target_args())));
+        match cmd.spawn() {
+            Ok(child) => Ok((child, op)),
+            Err(e) => {
+                op.fail(&e);
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Starts a remote command line that keeps running (e.g. `tail -F`),
+    /// with stdout and stderr piped; dropping the child kills ssh. The log
+    /// entry stays open: the caller finishes it when the command ends.
+    pub fn spawn_exec(&self, op_name: &str, command_line_remote: &str) -> Result<(Child, LogOp)> {
+        let mut cmd = self.channel_command();
+        cmd.arg("--")
+            .arg(&self.alias)
+            .arg(command_line_remote)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut op = self.log(Channel::Exec, op_name, command_line_remote);
+        op.equivalent(command_line(&cmd).replacen(&*self.ssh_bin.to_string_lossy(), "ssh", 1));
         match cmd.spawn() {
             Ok(child) => Ok((child, op)),
             Err(e) => {

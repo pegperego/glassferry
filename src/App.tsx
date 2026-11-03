@@ -39,6 +39,7 @@ import { FilePane, type PaneOps } from "./components/FilePane";
 import { QuickConnect } from "./components/QuickConnect";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { AboutDialog } from "./components/AboutDialog";
+import { UpdateDialog } from "./components/UpdateDialog";
 import { RemotePane } from "./components/RemotePane";
 import type { PaneBookmarks } from "./components/FilePane";
 import { SplitView } from "./components/SplitView";
@@ -60,12 +61,15 @@ import { useEdits } from "./useEdits";
 import { usePane, type PaneState } from "./usePane";
 import { sessionOf, useRemoteSlots } from "./useRemoteSlots";
 import { useTransfers } from "./useTransfers";
+import { restartImpact } from "./updates";
+import { useUpdates } from "./useUpdates";
 import "./App.css";
 
 type Modal =
   | { kind: "quick" }
   | { kind: "settings" }
   | { kind: "about" }
+  | { kind: "update" }
   | { kind: "manager"; startWithImport: boolean }
   /** Both remote panes are in use: which one does `connection` replace? */
   | { kind: "replace"; connection: Connection; startPath?: string; only?: number }
@@ -128,6 +132,12 @@ export default function App() {
   const log = useActivityLog(panelOpen && panelTab === "log");
   const [appError, setAppError] = useState<string | null>(null);
   const edits = useEdits((message) => setAppError(message));
+  const updates = useUpdates();
+  /** Manual check (Impostazioni, menu): the dialog shows its result. */
+  const checkUpdates = () => {
+    updates.check();
+    setModal({ kind: "update" });
+  };
 
   const localPane = usePane(localListDir, home);
   const remote = useRemoteSlots((id) => verboseHosts.has(id), edits.refresh);
@@ -199,10 +209,13 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // macOS menu bar: "Informazioni su Glassferry", "Impostazioni…".
+  const checkUpdatesRef = useRef(checkUpdates);
+  checkUpdatesRef.current = checkUpdates;
+  // macOS menu bar: "Informazioni su Glassferry", "Controlla aggiornamenti…", "Impostazioni…".
   useEffect(() => {
     const unlisten = onMenu((id) => {
       if (id === "about" || id === "settings") setModal({ kind: id });
+      else if (id === "updates") checkUpdatesRef.current();
     });
     return () => void unlisten.then((fn) => fn());
   }, []);
@@ -535,6 +548,12 @@ export default function App() {
         panelOpen={panelOpen}
         onTogglePanel={togglePanel}
         onSettings={() => setModal({ kind: "settings" })}
+        update={
+          updates.info && ["available", "installing", "installed"].includes(updates.phase)
+            ? { version: updates.info.version, installed: updates.phase === "installed" }
+            : null
+        }
+        onUpdate={() => setModal({ kind: "update" })}
       />
       <div className="workspace">
         <div className="panes">{panesView}</div>
@@ -557,7 +576,20 @@ export default function App() {
         />
       </div>
       {modal?.kind === "settings" && (
-        <SettingsDialog onClose={() => setModal(null)} onAbout={() => setModal({ kind: "about" })} />
+        <SettingsDialog
+          onClose={() => setModal(null)}
+          onAbout={() => setModal({ kind: "about" })}
+          autoUpdates={updates.auto}
+          onAutoUpdates={updates.setAuto}
+          onCheckUpdates={checkUpdates}
+        />
+      )}
+      {modal?.kind === "update" && (
+        <UpdateDialog
+          updates={updates}
+          impact={restartImpact(transfers.jobs, edits.edits)}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
       {modal?.kind === "quick" && store && (

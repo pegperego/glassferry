@@ -40,6 +40,7 @@ Voci nuove in attesa di una wave, e voci rimandate.
 |---|---|---|---|
 | Prova con configurazioni ssh complesse | rimandata | 2026-10-27 | ProxyJump, 1Password (`IdentityAgent`), 2FA/TOTP, `Match`: non presenti nel config usato per la prova sul campo. Rimandata il 2026-10-28 (dalla wave 1): servono configurazioni e server che ora non sono disponibili |
 | Prova dei pacchetti Linux (AppImage / deb / rpm, x64 e arm64) | rimandata | 2026-10-27 | Prodotti da `release.yml` (arm64 aggiunto il 2026-10-28, per provarli in una VM su Mac Apple silicon); checklist in [`linux-test.md`](linux-test.md). Rimandata il 2026-10-28 (dalla wave 1): serve una macchina o una VM Linux con desktop |
+| Aggiornamenti automatici | in corso | 2026-11-02 | Oggi l'utente deve controllare a mano le release su GitHub. Implementati il 2026-11-02 (`tauri-plugin-updater`, `latest.json` nelle release, firma minisign; vedi `architecture.md` §14). Manca la prova completa: due release di prova pubblicate (es. `0.4.0-rc1` → `rc2`), aggiornamento su macOS e Linux (AppImage, deb, rpm), Portachiavi dopo l'aggiornamento |
 
 ## Fuori scope
 

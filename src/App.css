@@ -1828,3 +1828,30 @@ button.link {
   max-height: 88vh;
   overflow: auto;
 }
+
+/* Update found (toolbar) and its dialog. */
+.toolbar .update-badge {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.modal.update {
+  width: min(560px, 90vw);
+}
+
+.release-notes {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 8px;
+  margin: 8px 0;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.modal.update .progress {
+  margin: 8px 0 4px;
+}

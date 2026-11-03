@@ -10,9 +10,12 @@ interface Props {
   panelOpen: boolean;
   onTogglePanel: () => void;
   onSettings: () => void;
+  /** A newer version found (or installed, waiting for a restart): opens its dialog. */
+  update: { version: string; installed: boolean } | null;
+  onUpdate: () => void;
 }
 
-export function Toolbar({ status, onQuickConnect, onManage, layout, onLayout, panelOpen, onTogglePanel, onSettings }: Props) {
+export function Toolbar({ status, onQuickConnect, onManage, layout, onLayout, panelOpen, onTogglePanel, onSettings, update, onUpdate }: Props) {
   return (
     <header className="toolbar">
       <button className="primary" title="Nuovo collegamento (⌘K)" onClick={onQuickConnect}>
@@ -37,6 +40,15 @@ export function Toolbar({ status, onQuickConnect, onManage, layout, onLayout, pa
       </div>
       <span className="spacer" />
       {status.length > 0 && <span className="muted small">{status.join(" · ")}</span>}
+      {update && (
+        <button
+          className="update-badge"
+          title={update.installed ? `Riavvia per usare la versione ${update.version}` : `Disponibile la versione ${update.version}`}
+          onClick={onUpdate}
+        >
+          {update.installed ? `↻ Riavvia per la ${update.version}` : `↑ Aggiornamento ${update.version}`}
+        </button>
+      )}
       <button className={panelOpen ? "toggle on" : ""} title="Pannello in basso (⌘J)" onClick={onTogglePanel}>
         Pannello <kbd>⌘J</kbd>
       </button>

@@ -52,6 +52,7 @@ Status: MVP complete. The interface is in Italian for now.
 | Activity log | `~/Library/Logs/Glassferry/` (Linux: `$XDG_STATE_HOME/glassferry/logs`) |
 | Local copies of files being edited | `~/Library/Caches/glassferry/edit/`. Removed when closed, and on exit once synced |
 | Control sockets | `/tmp/gf-<uid>` (mode 0700) |
+| Update checks | At start and once a day the app reads `latest.json` of the latest GitHub release (no other data is sent); turn it off in Impostazioni |
 
 ## Install
 
@@ -62,6 +63,8 @@ The macOS builds are not notarized yet, so macOS refuses to open the app the fir
 ```sh
 xattr -dr com.apple.quarantine /Applications/Glassferry.app
 ```
+
+Updates: the app finds new versions by itself and installs them after you confirm (packages are verified with the project's signing key). On Linux the AppImage is replaced, `.deb` and `.rpm` packages ask for the administrator password.
 
 ## Requirements
 

@@ -8,6 +8,12 @@
 #
 # macOS builds are signed ad-hoc and not notarized (no Apple Developer
 # account yet): Gatekeeper blocks them on first launch, see the README.
+#
+# Updates: every package is also signed with the updater key (minisign,
+# secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD;
+# the public key is in tauri.conf.json) and tauri-action attaches latest.json,
+# which the installed apps read from the latest published release (see
+# src-tauri/src/update.rs). Without the secrets the build fails.
 name: Release
 
 on:
@@ -97,6 +103,8 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target ${{ matrix.target }}
           # Empty when run by hand: build only, no release.
@@ -104,6 +112,8 @@ jobs:
           releaseName: Glassferry __VERSION__
           releaseDraft: true
           releaseBody: ${{ steps.notes.outputs.body }}
+          # latest.json for the updater (merged across the matrix jobs).
+          includeUpdaterJson: true
 
       - uses: actions/upload-artifact@v4
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -111,7 +121,9 @@ jobs:
           name: glassferry-${{ matrix.target }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz*
             src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
           if-no-files-found: error

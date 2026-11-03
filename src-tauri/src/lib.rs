@@ -19,6 +19,7 @@ pub mod settings;
 pub mod terminal;
 pub mod ssh_config;
 pub mod transfer;
+pub mod update;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -57,6 +58,7 @@ struct AppState {
     sessions: Mutex<HashMap<u64, OpenSession>>,
     /// Running searches, by the id the UI gave them.
     searches: Mutex<HashMap<u64, Arc<search::Cancel>>>,
+    updates: update::UpdateState,
 }
 
 struct OpenSession {
@@ -157,7 +159,7 @@ fn open_repository(app: tauri::AppHandle) -> Result<()> {
 }
 
 /// The macOS menu bar: Tauri's default menus, plus "Informazioni su
-/// Glassferry" and "Impostazioni…" in the app menu and the repository in Aiuto.
+/// Glassferry", "Controlla aggiornamenti…" and "Impostazioni…" in the app menu and the repository in Aiuto.
 #[cfg(target_os = "macos")]
 fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as P, Submenu};
@@ -168,6 +170,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         true,
         &[
             &MenuItem::with_id(app, "about", "Informazioni su Glassferry", true, None::<&str>)?,
+            &MenuItem::with_id(app, "updates", "Controlla aggiornamenti…", true, None::<&str>)?,
             &sep()?,
             &MenuItem::with_id(app, "settings", "Impostazioni…", true, Some("CmdOrCtrl+,"))?,
             &sep()?,
@@ -214,6 +217,39 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         &[&MenuItem::with_id(app, "repository", "Glassferry su GitHub", true, None::<&str>)?],
     )?;
     Menu::with_items(app, &[&app_menu, &edit, &window, &help])
+}
+
+/// Looks for a newer version of the app (see `update.rs`).
+#[tauri::command]
+async fn update_check(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<update::UpdateInfo>> {
+    state.updates.check(&app, &state.logger).await
+}
+
+/// Downloads and installs the update found by `update_check`; it runs after
+/// `update_restart`.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String> {
+    state.updates.install(&app, &state.logger).await
+}
+
+/// Restarts the app into the installed update. Goes through the usual exit
+/// (edit copies, ControlMasters, askpass socket are cleaned up).
+#[tauri::command]
+fn update_restart(app: tauri::AppHandle, state: State<'_, AppState>) {
+    state.logger.start(None, log::Channel::Local, "update-restart", "riavvio").ok(None);
+    app.request_restart();
+}
+
+/// The release page of `version` (for builds that cannot update themselves).
+#[tauri::command]
+fn update_open_release(app: tauri::AppHandle, version: String) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    if !version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
+        return Err(AppError::Other(format!("versione non valida: {version}")));
+    }
+    app.opener()
+        .open_url(format!("{REPOSITORY_URL}/releases/tag/v{version}"), None::<&str>)
+        .map_err(|e| AppError::Other(e.to_string()))
 }
 
 #[tauri::command]
@@ -743,11 +779,13 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // Used from Rust only (no JS permissions): see `update.rs`.
+        .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu).on_menu_event(|app, event| match event.id().as_ref() {
         // The UI opens its dialogs; the repository opens in the browser.
-        id @ ("about" | "settings") => {
+        id @ ("about" | "settings" | "updates") => {
             let _ = app.emit("menu", id);
         }
         "repository" => {
@@ -829,6 +867,7 @@ pub fn run() {
                 next_session_id: AtomicU64::new(1),
                 sessions: Mutex::new(HashMap::new()),
                 searches: Mutex::new(HashMap::new()),
+                updates: update::UpdateState::default(),
             });
             Ok(())
         })
@@ -838,6 +877,10 @@ pub fn run() {
             open_repository,
             settings_load,
             settings_save,
+            update_check,
+            update_install,
+            update_restart,
+            update_open_release,
             ssh_check,
             open_terminal,
             terminal_list,

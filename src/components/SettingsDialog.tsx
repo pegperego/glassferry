@@ -35,10 +35,14 @@ interface Props {
   onClose: () => void;
   /** "Informazioni su Glassferry" (on Linux there is no app menu). */
   onAbout: () => void;
+  /** Automatic update checks (a UI preference, saved with the rest). */
+  autoUpdates: boolean;
+  onAutoUpdates: (auto: boolean) => void;
+  onCheckUpdates: () => void;
 }
 
 /** "Impostazioni" (⌘,): settings stored by the backend. */
-export function SettingsDialog({ onClose, onAbout }: Props) {
+export function SettingsDialog({ onClose, onAbout, autoUpdates, onAutoUpdates, onCheckUpdates }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sshBin, setSshBin] = useState("");
   const [terminal, setTerminal] = useState(AUTO);
@@ -48,6 +52,7 @@ export function SettingsDialog({ onClose, onAbout }: Props) {
   const [editors, setEditors] = useState<{ extensions: string; app: string }[]>([]);
   const [check, setCheck] = useState<{ path: string; result: SshCheck | string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [auto, setAuto] = useState(autoUpdates);
 
   useEffect(() => {
     Promise.all([settingsLoad(), terminalList()]).then(
@@ -89,7 +94,10 @@ export function SettingsDialog({ onClose, onAbout }: Props) {
       terminal: terminalSettings(terminal, command),
       editors: editorRules,
     }).then(
-      onClose,
+      () => {
+        onAutoUpdates(auto);
+        onClose();
+      },
       (err) => setError(String(err)),
     );
   };
@@ -216,6 +224,22 @@ export function SettingsDialog({ onClose, onAbout }: Props) {
             <button type="button" onClick={() => setEditors([...editors, { extensions: "", app: "" }])}>
               + Aggiungi regola
             </button>
+          </section>
+        )}
+        {settings && (
+          <section>
+            <h3>Aggiornamenti</h3>
+            <label className="checkbox">
+              <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+              Controlla gli aggiornamenti all'avvio e una volta al giorno
+            </label>
+            <p className="muted small">
+              Il controllo legge l'ultima release pubblicata su GitHub; niente viene installato senza la tua conferma e i
+              pacchetti sono verificati con la firma del progetto.{" "}
+              <button type="button" className="inline link" onClick={onCheckUpdates}>
+                Controlla ora
+              </button>
+            </p>
           </section>
         )}
         {error && <p className="error-text small">{error}</p>}

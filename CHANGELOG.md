@@ -2,6 +2,12 @@
 
 Notable changes of each release. The section of a version is also the text of its GitHub release (`.github/workflows/release.yml`).
 
+## [Unreleased]
+
+### Added
+
+- Automatic updates: the app checks GitHub for a new version at start and once a day (can be turned off in Impostazioni, or checked by hand), shows the release notes and installs it after you confirm; packages are verified with the project's signing key. Restarting is a separate step, with a warning when transfers are running.
+
 ## [0.3.0] - 2026-10-29
 
 First public release. The interface is in Italian for now.

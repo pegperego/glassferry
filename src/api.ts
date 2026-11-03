@@ -117,7 +117,32 @@ export interface AppInfo {
 export const appInfo = () => invoke<AppInfo>("app_info");
 export const openRepository = () => invoke<void>("open_repository");
 
-/** macOS menu items handled by the UI: "about", "settings". */
+/** A newer version found by `update_check` (see src-tauri/src/update.rs). */
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  /** Release notes (Markdown). */
+  notes: string | null;
+  /** RFC 3339. */
+  date: string | null;
+  /** How it installs; null: this build cannot update itself (open the release page). */
+  installer: "app" | "appimage" | "deb" | "rpm" | null;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
+export const updateCheck = () => invoke<UpdateInfo | null>("update_check");
+/** Downloads, verifies and installs the update found by the last check; returns its version. */
+export const updateInstall = () => invoke<string>("update_install");
+export const updateRestart = () => invoke<void>("update_restart");
+export const updateOpenRelease = (version: string) => invoke<void>("update_open_release", { version });
+export const onUpdateProgress = (handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> =>
+  listen<UpdateProgress>("update-progress", (event) => handler(event.payload));
+
+/** macOS menu items handled by the UI: "about", "settings", "updates". */
 export const onMenu = (handler: (id: string) => void): Promise<UnlistenFn> =>
   listen<string>("menu", (event) => handler(event.payload));
 

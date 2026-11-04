@@ -4,6 +4,11 @@
 //! The only options we add to the user's config are the ones needed to own
 //! the master (`-M`, `-S`, `ControlPersist`) and, for channels, the ones that
 //! would otherwise break a binary protocol (`-T`, `RemoteCommand=none`).
+//!
+//! Windows: Microsoft's OpenSSH has no ControlMaster (docs/windows.md). A
+//! session is then a single `ssh -s sftp` process, authenticated once; shell
+//! commands are off (each would authenticate again) and every feature uses
+//! its SFTP path. Its stdin and stdout are pipes overlapped on both ends.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -22,6 +27,9 @@ use crate::log::{sftp_equivalent, shell_line, Channel, LogOp, Logger};
 
 const CONTROL_PERSIST: &str = "ControlPersist=15m";
 const PROBE_MARKER: &str = "__GF__";
+/// Channels share a ControlMaster (not on Windows: see the module docs).
+pub const MULTIPLEXED: bool = cfg!(unix);
+
 const PROBED_COMMANDS: &[&str] = &["rm", "cp", "mv", "du", "find", "sha256sum", "tar", "unzip", "chmod", "chown", "chgrp", "tail"];
 
 /// How ssh processes for one host are spawned.
@@ -53,6 +61,7 @@ fn command_line(cmd: &Command) -> String {
 impl SshLauncher {
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.ssh_bin);
+        crate::platform::no_window(&mut cmd);
         cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
         if let Some(file) = &self.config_file {
             cmd.arg("-F").arg(file);
@@ -84,14 +93,29 @@ impl SshLauncher {
     /// connection if the master is gone (ssh's default behaviour).
     fn channel_command(&self) -> Command {
         let mut cmd = self.command();
-        cmd.arg("-S")
-            .arg(&self.control_path)
-            .args(["-o", "ControlMaster=no", "-o", "RemoteCommand=none", "-T"]);
+        if MULTIPLEXED {
+            cmd.arg("-S").arg(&self.control_path).args(["-o", "ControlMaster=no"]);
+        } else {
+            // No master: the channel is the connection, its diagnostics go
+            // to the log file the master would use (read on errors).
+            cmd.arg("-E").arg(&self.log_path);
+            if self.verbose {
+                cmd.arg("-v");
+            }
+        }
+        cmd.args(["-o", "RemoteCommand=none", "-T"]);
         cmd
     }
 
     /// Starts the master and waits until authentication has completed.
+    /// Without multiplexing there is no master: authentication happens on
+    /// the SFTP channel.
     pub async fn start_master(&self) -> Result<()> {
+        if !MULTIPLEXED {
+            self.log(Channel::Ssh, "connect", "senza ControlMaster: l'autenticazione avviene sul canale SFTP")
+                .ok(Some("una sola connessione, comandi shell disattivati".into()));
+            return Ok(());
+        }
         let _ = std::fs::remove_file(&self.log_path);
         if self.control_path.exists() {
             // A leftover master on our socket would capture every channel
@@ -156,6 +180,9 @@ impl SshLauncher {
     }
 
     pub async fn stop_master(&self) {
+        if !MULTIPLEXED {
+            return;
+        }
         let cmd = Command::from(self.stop_command());
         let op = self.log(Channel::Ssh, "disconnect", command_line(&cmd));
         self.finish_stop(op, Command::from(self.stop_command()).status().await);
@@ -163,6 +190,9 @@ impl SshLauncher {
 
     /// Blocking variant used while the app is shutting down.
     pub fn stop_master_blocking(&self) {
+        if !MULTIPLEXED {
+            return;
+        }
         let cmd = Command::from(self.stop_command());
         let op = self.log(Channel::Ssh, "disconnect", command_line(&cmd));
         self.finish_stop(op, self.stop_command().status());
@@ -182,31 +212,45 @@ impl SshLauncher {
         std::fs::read_to_string(&self.log_path).unwrap_or_default()
     }
 
-    /// Spawns `ssh -s <alias> sftp` over the master.
-    pub fn spawn_sftp(&self) -> Result<(Child, LogOp)> {
+    /// Spawns `ssh -s <alias> sftp` over the master (or alone, see
+    /// `MULTIPLEXED`).
+    pub fn spawn_sftp(&self) -> Result<SftpProcess> {
         let mut cmd = self.channel_command();
-        cmd.args(["-s", "--"])
-            .arg(&self.alias)
-            .arg("sftp")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
+        cmd.args(["-s", "--"]).arg(&self.alias).arg("sftp").stderr(Stdio::piped()).kill_on_drop(true);
+        #[cfg(windows)]
+        let (to_ssh, from_ssh) = {
+            let (to_ssh, child_stdin) = crate::platform::overlapped_pipe(false)?;
+            let (from_ssh, child_stdout) = crate::platform::overlapped_pipe(true)?;
+            cmd.stdin(Stdio::from(child_stdin)).stdout(Stdio::from(child_stdout));
+            (to_ssh, from_ssh)
+        };
+        #[cfg(unix)]
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
         let mut op = self.log(Channel::Ssh, "sftp-channel", command_line(&cmd));
         op.equivalent(shell_line(std::iter::once("sftp".to_string()).chain(self.target_args())));
-        match cmd.spawn() {
-            Ok(child) => Ok((child, op)),
+        let spawned = cmd.spawn();
+        // The child's pipe ends were moved into `cmd`: close our copies.
+        drop(cmd);
+        let mut child = match spawned {
+            Ok(child) => child,
             Err(e) => {
                 op.fail(&e);
-                Err(e.into())
+                return Err(e.into());
             }
-        }
+        };
+        let stderr = child.stderr.take().expect("piped stderr");
+        #[cfg(unix)]
+        let (to_ssh, from_ssh) = (child.stdin.take().expect("piped stdin"), child.stdout.take().expect("piped stdout"));
+        Ok(SftpProcess { child, to_ssh: Box::new(to_ssh), from_ssh: Box::new(from_ssh), stderr, op })
     }
 
     /// Starts a remote command line that keeps running (e.g. `tail -F`),
     /// with stdout and stderr piped; dropping the child kills ssh. The log
     /// entry stays open: the caller finishes it when the command ends.
     pub fn spawn_exec(&self, op_name: &str, command_line_remote: &str) -> Result<(Child, LogOp)> {
+        if !MULTIPLEXED {
+            return Err(no_shell());
+        }
         let mut cmd = self.channel_command();
         cmd.arg("--")
             .arg(&self.alias)
@@ -228,6 +272,9 @@ impl SshLauncher {
 
     /// Runs a remote command line (already quoted for a POSIX shell).
     pub async fn exec(&self, op_name: &str, command_line_remote: &str) -> Result<std::process::Output> {
+        if !MULTIPLEXED {
+            return Err(no_shell());
+        }
         let mut cmd = self.channel_command();
         cmd.arg("--")
             .arg(&self.alias)
@@ -253,6 +300,19 @@ impl SshLauncher {
             }
         }
     }
+}
+
+/// The SFTP channel's process and its pipes.
+pub struct SftpProcess {
+    pub child: Child,
+    pub to_ssh: Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
+    pub from_ssh: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+    pub stderr: tokio::process::ChildStderr,
+    pub op: LogOp,
+}
+
+fn no_shell() -> AppError {
+    AppError::Other("comandi shell non disponibili senza ControlMaster (Windows)".into())
 }
 
 /// Last non-debug line of an ssh log: usually the actual error.
@@ -284,26 +344,38 @@ pub fn sh_command(script: &str, args: &[&str]) -> String {
 pub struct Capabilities {
     /// The account can run shell commands (not an SFTP-only account).
     pub shell: bool,
+    /// The probe ran. Without a ControlMaster (Windows) it does not: `shell`
+    /// is then false for the app's commands, but the server may still give
+    /// a terminal a shell.
+    pub probed: bool,
     pub os: Option<String>,
     pub commands: Vec<String>,
 }
 
 pub async fn probe(launcher: &SshLauncher) -> Capabilities {
+    if !MULTIPLEXED {
+        // Every command would be a new connection, authenticated again.
+        launcher
+            .log(Channel::Exec, "probe", "saltato: senza ControlMaster i comandi shell sono disattivati")
+            .ok(Some("solo SFTP".into()));
+        return Capabilities::default();
+    }
     let script = format!(
         "echo {PROBE_MARKER}; uname -s; for c in {}; do command -v \"$c\" >/dev/null 2>&1 && echo \"$c\"; done",
         PROBED_COMMANDS.join(" ")
     );
     let Ok(output) = launcher.exec("probe", &sh_command(&script, &[])).await else {
-        return Capabilities::default();
+        return Capabilities { probed: true, ..Default::default() };
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines().map(str::trim);
     // Banners or MOTD-like noise may precede the marker.
     if !lines.by_ref().any(|l| l == PROBE_MARKER) {
-        return Capabilities::default();
+        return Capabilities { probed: true, ..Default::default() };
     }
     Capabilities {
         shell: true,
+        probed: true,
         os: lines.next().map(str::to_string),
         commands: lines
             .filter(|l| PROBED_COMMANDS.contains(l))
@@ -319,7 +391,7 @@ pub struct Session {
     pub capabilities: Capabilities,
     /// Owner and group names, read on first use.
     id_names: tokio::sync::OnceCell<crate::ids::IdNames>,
-    _sftp_process: Child,
+    sftp_process: std::sync::Mutex<Child>,
 }
 
 impl Session {
@@ -335,12 +407,9 @@ impl Session {
     }
 
     async fn open_channels(launcher: &SshLauncher) -> Result<Self> {
-        let (mut child, op) = launcher.spawn_sftp()?;
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let mut stderr = child.stderr.take().expect("piped stderr");
+        let SftpProcess { child, to_ssh, from_ssh, mut stderr, op } = launcher.spawn_sftp()?;
 
-        let sftp = match Sftp::new(stdin, stdout, SftpOptions::default()).await {
+        let sftp = match Sftp::new(to_ssh, from_ssh, SftpOptions::default()).await {
             Ok(sftp) => sftp,
             Err(e) => {
                 let mut message = String::new();
@@ -375,7 +444,7 @@ impl Session {
             home,
             capabilities,
             id_names: tokio::sync::OnceCell::new(),
-            _sftp_process: child,
+            sftp_process: std::sync::Mutex::new(child),
         })
     }
 
@@ -461,8 +530,19 @@ impl Session {
     }
 
     pub async fn close(self) {
-        let _ = self.sftp.close().await;
-        self.launcher.stop_master().await;
+        // Without a master, ssh does not see the end of its stdin on Windows
+        // (docs/windows.md): wait briefly, then end the process.
+        let wait = if MULTIPLEXED { Duration::from_secs(30) } else { Duration::from_secs(2) };
+        let Self { sftp, sftp_process, launcher, .. } = self;
+        let _ = tokio::time::timeout(wait, sftp.close()).await;
+        let _ = sftp_process.lock().unwrap().start_kill();
+        launcher.stop_master().await;
+    }
+
+    /// Ends the SFTP process (and so, without a master, the connection).
+    /// Also for a session still shared by a running command, and on exit.
+    pub fn stop(&self) {
+        let _ = self.sftp_process.lock().unwrap().start_kill();
     }
 }
 

@@ -41,7 +41,9 @@ export function RemotePane({ connection, name, category, session, onDisconnect, 
       info={
         capabilities.shell
           ? `Shell ${capabilities.os ?? ""} · ${capabilities.commands.join(", ")}`
-          : "Account solo SFTP"
+          : capabilities.probed
+            ? "Account solo SFTP"
+            : "Solo SFTP (su Windows i comandi shell sono disattivati)"
       }
     />
   );

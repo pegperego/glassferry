@@ -78,11 +78,11 @@ type Modal =
   | { kind: "disconnect"; slot: number; files: EditInfo[]; then: () => void }
   | null;
 
-/** What the account allows beyond SFTP: a shell (remote terminal), chown/chgrp, tar/unzip. */
+/** What the account allows beyond SFTP: a shell (remote terminal), chown/chgrp, tar/unzip. `terminal`: a terminal can be offered (shell found, or not probed). */
 function paneOps(
   target: Target,
   protection: Protection | null,
-  can: { shell: boolean; chown: boolean; tar: boolean; unzip: boolean },
+  can: { terminal: boolean; chown: boolean; tar: boolean; unzip: boolean },
 ): PaneOps {
   return {
     mkdir: (dir, name) => fsMkdir(target, dir, name),
@@ -93,7 +93,7 @@ function paneOps(
     discard: (id) => void fsPlanDiscard(id).catch(() => {}),
     permanentDelete: target.kind === "remote",
     protection,
-    openTerminal: can.shell ? (dir) => openTerminal(target, dir) : null,
+    openTerminal: can.terminal ? (dir) => openTerminal(target, dir) : null,
     attrs: (dir, names, change, dryRun) => fsAttrs(target, dir, names, change, dryRun),
     dirSize: (dir, names) => fsDirSize(target, dir, names),
     search: (dir, query, id) => fsSearch(target, dir, query, id),
@@ -106,7 +106,7 @@ function paneOps(
   };
 }
 
-const localOps = paneOps({ kind: "local" }, null, { shell: true, chown: false, tar: true, unzip: true });
+const localOps = paneOps({ kind: "local" }, null, { terminal: true, chown: false, tar: true, unzip: true });
 
 /** `dir` is `path` or inside it. */
 const within = (path: string | null, dir: string) =>
@@ -440,7 +440,7 @@ export default function App() {
             { kind: "remote", sessionId: s.result.sessionId },
             protectionOf(store, s.connection),
             {
-              shell: s.result.capabilities.shell,
+              terminal: s.result.capabilities.shell || !s.result.capabilities.probed,
               chown: ["chown", "chgrp"].every((c) => s.result.capabilities.commands.includes(c)),
               tar: s.result.capabilities.commands.includes("tar"),
               unzip: s.result.capabilities.commands.includes("unzip"),

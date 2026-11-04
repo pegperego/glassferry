@@ -337,15 +337,52 @@ async fn run(report: &Report) {
     let (stdin, child_in) = overlapped_pipe(false).expect("stdin pipe");
     let mut child = {
         use std::os::windows::process::CommandExt;
+        // Variants to compare with the app: host, the app's channel options,
+        // stderr on a pipe instead of a file.
+        let host = std::env::var("GF_SPIKE_HOST").unwrap_or_else(|_| "gf-sftponly".into());
         let mut c = std::process::Command::new("ssh");
-        c.args(["-s", "--", "gf-sftponly", "sftp"])
+        if std::env::var("GF_SPIKE_APPARGS").is_ok() {
+            c.args(["-o", "RemoteCommand=none", "-T"]);
+        }
+        c.args(["-s", "--", &host, "sftp"])
             .envs(env.iter().map(|(k, v)| (k, v)))
             .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::from(child_in))
-            .stdout(Stdio::from(child_out))
-            .stderr(Stdio::from(std::fs::File::create(&sftp_log).expect("sftp log")));
+            .stdout(Stdio::from(child_out));
+        let stderr_pipe = std::env::var("GF_SPIKE_STDERR_PIPE").is_ok();
+        if stderr_pipe {
+            c.stderr(Stdio::piped());
+        } else {
+            c.stderr(Stdio::from(std::fs::File::create(&sftp_log).expect("sftp log")));
+        }
+        report.line(format!("  varianti: host {host}, opzioni app {}, stderr su pipe {stderr_pipe}, tokio {}", std::env::var("GF_SPIKE_APPARGS").is_ok(), std::env::var("GF_SPIKE_TOKIO").is_ok()));
+        if std::env::var("GF_SPIKE_TOKIO").is_ok() {
+            let mut t = tokio::process::Command::from(c);
+            t.kill_on_drop(true);
+            let spawned = t.spawn();
+            drop(t);
+            match spawned {
+                Ok(child) => {
+                    // Keep it alive for the test; tokio's Child is not a std Child.
+                    std::mem::forget(child);
+                }
+                Err(e) => {
+                    report.check("avvio di ssh -s sftp (tokio)", false, e.to_string());
+                    return;
+                }
+            }
+            let opened = tokio::time::timeout(std::time::Duration::from_secs(20), Sftp::new(stdin, stdout, SftpOptions::default())).await;
+            report.check("SFTP su stdin/stdout (tokio)", matches!(opened, Ok(Ok(_))), match &opened { Ok(Ok(_)) => "ok".to_string(), Ok(Err(e)) => e.to_string(), Err(_) => "bloccato oltre 20 s".to_string() });
+            report.line(format!("  richieste: {:?}", std::mem::take(&mut *prompts.lock().unwrap())));
+            return;
+        }
         match c.spawn() {
-            Ok(child) => child,
+            Ok(mut child) => {
+                if let Some(mut err) = child.stderr.take() {
+                    std::thread::spawn(move || { let mut sink = Vec::new(); let _ = std::io::Read::read_to_end(&mut err, &mut sink); });
+                }
+                child
+            }
             Err(e) => {
                 report.check("avvio di ssh -s sftp", false, e.to_string());
                 return;

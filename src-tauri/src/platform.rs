@@ -153,3 +153,55 @@ pub fn process_alive(pid: u32) -> bool {
         }
     }
 }
+
+/// A pipe for a child's stdin (`inbound` false) or stdout (`inbound` true),
+/// overlapped on both ends: Microsoft's ssh hangs after authentication when
+/// its stdout is a pipe from `Stdio::piped()` (or `CreatePipe`), and works
+/// with handles like those `sftp.exe` creates (docs/windows.md, phase 0).
+/// Returns the app's end (async) and the child's end (inheritable). Must run
+/// inside the Tokio runtime.
+#[cfg(windows)]
+pub fn overlapped_pipe(inbound: bool) -> std::io::Result<(tokio::net::windows::named_pipe::NamedPipeServer, std::os::windows::io::OwnedHandle)> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{FromRawHandle, OwnedHandle, RawHandle};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING, PIPE_ACCESS_INBOUND, PIPE_ACCESS_OUTBOUND};
+    use windows_sys::Win32::System::Pipes::{CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT};
+
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let token = crate::runtime_dir::random_token().map_err(|e| std::io::Error::other(e.to_string()))?;
+    let name = format!(r"\\.\pipe\glassferry-io-{}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed), &token[..8]);
+    let wide: Vec<u16> = std::ffi::OsStr::new(&name).encode_wide().chain(Some(0)).collect();
+    // SAFETY: plain Win32 calls; each handle is checked and owned exactly once.
+    unsafe {
+        let access = if inbound { PIPE_ACCESS_INBOUND } else { PIPE_ACCESS_OUTBOUND };
+        let server = CreateNamedPipeW(
+            wide.as_ptr(),
+            access | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            64 * 1024,
+            64 * 1024,
+            0,
+            std::ptr::null(),
+        );
+        if server == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: 1,
+        };
+        let client_access = if inbound { GENERIC_WRITE } else { GENERIC_READ };
+        let client = CreateFileW(wide.as_ptr(), client_access, 0, &attributes, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, std::ptr::null_mut());
+        if client == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        // Registered with Tokio once both ends exist (connected).
+        let server = tokio::net::windows::named_pipe::NamedPipeServer::from_raw_handle(server as RawHandle)?;
+        Ok((server, OwnedHandle::from_raw_handle(client as RawHandle)))
+    }
+}

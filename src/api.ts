@@ -10,6 +10,8 @@ export interface HostEntry {
 
 export interface Capabilities {
   shell: boolean;
+  /** False without a ControlMaster (Windows): shell commands are off, but the server may have a shell. */
+  probed: boolean;
   os: string | null;
   commands: string[];
 }

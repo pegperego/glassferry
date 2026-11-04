@@ -280,7 +280,7 @@ async fn open_terminal(state: State<'_, AppState>, target: Target, path: String)
         Target::Local => None,
         Target::Remote { session_id } => {
             let session = state.session(session_id)?;
-            if !session.capabilities.shell {
+            if session.capabilities.probed && !session.capabilities.shell {
                 return Err(AppError::Other("account solo SFTP: il server non concede una shell".into()));
             }
             Some(session)
@@ -472,8 +472,11 @@ async fn disconnect(state: State<'_, AppState>, session_id: u64) -> Result<()> {
     if let Some(session) = session {
         match Arc::try_unwrap(session) {
             Ok(session) => session.close().await,
-            // Still in use by a running command: just stop the master.
-            Err(shared) => shared.launcher.stop_master().await,
+            // Still in use by a running command: just stop the connection.
+            Err(shared) => {
+                shared.stop();
+                shared.launcher.stop_master().await;
+            }
         }
     }
     Ok(())
@@ -986,6 +989,7 @@ pub fn run() {
             state.edits.close_unchanged();
             for open in state.sessions.lock().unwrap().values() {
                 open.session.launcher.stop_master_blocking();
+                open.session.stop();
             }
             state.askpass.remove_socket();
         }

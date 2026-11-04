@@ -1,7 +1,6 @@
 //! Local filesystem access for the left pane.
 
 use std::fs::Metadata;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -50,6 +49,7 @@ fn list_dir_blocking(path: &Path) -> Result<Vec<FileEntry>> {
 }
 
 fn to_entry(name: String, kind: EntryKind, target_is_dir: bool, meta: &Metadata) -> FileEntry {
+    let (uid, gid) = crate::platform::owner(meta);
     FileEntry {
         name,
         kind,
@@ -60,15 +60,15 @@ fn to_entry(name: String, kind: EntryKind, target_is_dir: bool, meta: &Metadata)
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_secs()),
-        permissions: Some(meta.permissions().mode() & 0o7777),
-        uid: Some(meta.uid()),
-        gid: Some(meta.gid()),
-        owner: crate::ids::local_user(meta.uid()),
-        group: crate::ids::local_group(meta.gid()),
+        permissions: crate::platform::mode(meta),
+        uid,
+        gid,
+        owner: uid.and_then(crate::ids::local_user),
+        group: gid.and_then(crate::ids::local_group),
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

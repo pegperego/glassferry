@@ -92,7 +92,7 @@ pub mod local {
                 return Err(exists_error(to));
             }
             tokio::fs::rename(from, to).await.map_err(|e| {
-                if e.raw_os_error() == Some(libc::EXDEV) {
+                if crate::platform::is_cross_device(&e) {
                     AppError::Other("spostamento tra volumi diversi non supportato: usa copia ed elimina".into())
                 } else {
                     e.into()
@@ -104,11 +104,7 @@ pub mod local {
     }
 
     fn same_file(a: &str, b: &str) -> bool {
-        use std::os::unix::fs::MetadataExt;
-        match (std::fs::symlink_metadata(a), std::fs::symlink_metadata(b)) {
-            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
-            _ => false,
-        }
+        crate::platform::same_file(Path::new(a), Path::new(b))
     }
 
     pub async fn delete(logger: &Arc<Logger>, dir: &str, names: &[String]) -> Result<DeleteMethod> {

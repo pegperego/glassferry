@@ -967,8 +967,7 @@ fn remove_copy(local_path: &str) {
 }
 
 fn restrict_permissions(dir: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    let _ = crate::platform::set_mode(dir, 0o700);
 }
 
 fn backup_path(path: &Path) -> PathBuf {

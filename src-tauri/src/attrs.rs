@@ -211,7 +211,9 @@ pub mod local {
     }
 
     pub(super) fn set_mode(paths: &[String], mode: u32, recursive: bool) -> Result<usize> {
-        use std::os::unix::fs::PermissionsExt;
+        if cfg!(windows) {
+            return Err(AppError::Other("i permessi Unix non esistono sui file di Windows".into()));
+        }
         let mut stack: Vec<std::path::PathBuf> = paths.iter().rev().map(Into::into).collect();
         let mut count = 0;
         while let Some(path) = stack.pop() {
@@ -224,7 +226,7 @@ pub mod local {
                     stack.push(child?.path());
                 }
             }
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
+            crate::platform::set_mode(&path, mode)?;
             count += 1;
         }
         Ok(count)
@@ -262,6 +264,7 @@ mod tests {
         assert_eq!(scripts, vec![("chgrp", r#"chgrp -- www "$@""#.to_string())]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn local_chmod_is_recursive_and_skips_symlinks() {
         use std::os::unix::fs::PermissionsExt;

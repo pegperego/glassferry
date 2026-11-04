@@ -176,6 +176,7 @@ mod tests {
         assert_eq!(parse_du("", 1, 1), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn local_walk_adds_files_and_skips_links() {
         let dir = std::env::temp_dir().join(format!("gf-dirsize-{}", std::process::id()));

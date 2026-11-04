@@ -9,7 +9,11 @@ use tokio::process::Command;
 
 use crate::error::{AppError, Result};
 
+#[cfg(unix)]
 pub const DEFAULT_SSH_BIN: &str = "/usr/bin/ssh";
+/// Microsoft's OpenSSH, part of Windows 10 and later.
+#[cfg(windows)]
+pub const DEFAULT_SSH_BIN: &str = r"C:\Windows\System32\OpenSSH\ssh.exe";
 /// `SSH_ASKPASS_REQUIRE`, which the in-app prompts rely on.
 const MIN_SSH_VERSION: (u32, u32) = (8, 4);
 
@@ -144,9 +148,11 @@ pub async fn check_ssh(path: &Path) -> Result<SshCheck> {
     Ok(SshCheck { version, supported })
 }
 
-/// `OpenSSH_9.8p1, LibreSSL 3.3.6` → (9, 8).
+/// `OpenSSH_9.8p1, LibreSSL 3.3.6` → (9, 8); also Microsoft's
+/// `OpenSSH_for_Windows_9.5p2`.
 fn openssh_version(text: &str) -> Option<(u32, u32)> {
     let rest = text.strip_prefix("OpenSSH_")?;
+    let rest = rest.strip_prefix("for_Windows_").unwrap_or(rest);
     let mut parts = rest.split(|c: char| !c.is_ascii_digit());
     Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
@@ -159,7 +165,9 @@ mod tests {
     fn parses_openssh_versions() {
         assert_eq!(openssh_version("OpenSSH_9.8p1, LibreSSL 3.3.6"), Some((9, 8)));
         assert_eq!(openssh_version("OpenSSH_8.4p1 Debian-5+deb11u3, OpenSSL 1.1.1w"), Some((8, 4)));
-        assert_eq!(openssh_version("OpenSSH_for_Windows_8.1p1"), None);
+        assert_eq!(openssh_version("OpenSSH_for_Windows_8.1p1"), Some((8, 1)));
+        assert_eq!(openssh_version("OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2"), Some((9, 5)));
+        assert_eq!(openssh_version("SSH-2.0-dropbear"), None);
         assert!(Some((8, 4)) >= Some(MIN_SSH_VERSION));
         assert!((8, 3) < MIN_SSH_VERSION);
     }
@@ -194,6 +202,7 @@ mod tests {
         assert!(half.normalized().is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn normalizes_ssh_path() {
         let with = |path: &str| Settings { ssh_bin: Some(path.into()), ..Default::default() };

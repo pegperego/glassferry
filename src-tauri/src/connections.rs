@@ -10,7 +10,6 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -160,7 +159,12 @@ impl Store {
             if bookmark.name.trim().is_empty() {
                 return invalid("un segnalibro non ha nome");
             }
-            if !bookmark.path.starts_with('/') {
+            // Remote paths are POSIX; local ones follow this system (C:\ on Windows).
+            let absolute = match bookmark.connection_id {
+                Some(_) => bookmark.path.starts_with('/'),
+                None => bookmark.path.starts_with('/') || Path::new(&bookmark.path).is_absolute(),
+            };
+            if !absolute {
                 return invalid(format!("segnalibro «{}»: percorso non assoluto", bookmark.name));
             }
             if let Some(id) = &bookmark.connection_id
@@ -308,23 +312,30 @@ pub fn render_ssh_config<'a>(blocks: impl IntoIterator<Item = (String, &'a Sourc
     for (alias, source) in blocks {
         out.push_str(&host_block(&alias, source));
     }
-    out.push_str("Match all\nInclude ~/.ssh/config\nInclude /etc/ssh/ssh_config\n");
+    out.push_str(&format!("Match all\nInclude ~/.ssh/config\nInclude {}\n", system_ssh_config()));
     out
 }
 
 /// Writes a file atomically with mode 0600.
 fn write_private(path: &Path, content: &[u8]) -> Result<()> {
     let tmp = path.with_extension("tmp");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)?;
+    let mut file = crate::platform::private_file_options().write(true).create(true).truncate(true).open(&tmp)?;
     file.write_all(content)?;
     file.sync_all()?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// The system-wide client config, included after the user's (ssh reads it
+/// itself without `-F`). Windows: `%PROGRAMDATA%\ssh\ssh_config`, written
+/// with `/` and quoted, which Microsoft's OpenSSH accepts.
+fn system_ssh_config() -> String {
+    if cfg!(windows) {
+        let base = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".into());
+        format!("\"{}/ssh/ssh_config\"", base.replace('\\', "/"))
+    } else {
+        "/etc/ssh/ssh_config".into()
+    }
 }
 
 /// Where ssh must find a connection: alias plus optional `-F` file.
@@ -525,7 +536,7 @@ mod tests {
             "{out}"
         );
         assert!(!out.contains("gf-b"));
-        assert!(out.ends_with("Match all\nInclude ~/.ssh/config\nInclude /etc/ssh/ssh_config\n"));
+        assert!(out.ends_with(&format!("Match all\nInclude ~/.ssh/config\nInclude {}\n", system_ssh_config())));
     }
 
     #[test]
@@ -592,6 +603,7 @@ mod tests {
         assert!(old.bookmarks.is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn saves_and_loads_with_private_permissions() {
         use std::os::unix::fs::PermissionsExt;

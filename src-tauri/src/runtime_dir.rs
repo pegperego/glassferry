@@ -3,13 +3,27 @@
 //! Unix socket paths are limited (~104 bytes on macOS) and ssh appends a
 //! random suffix while creating the ControlPath, so the directory path must
 //! stay short: `$XDG_RUNTIME_DIR/gf` on Linux, `/tmp/gf-<uid>` otherwise.
+//! Windows has no Unix sockets here (named pipes instead): the directory is
+//! `%LOCALAPPDATA%\glassferry\run`, private like the rest of the profile.
 
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 
-use crate::error::{AppError, Result};
+#[cfg(unix)]
+use crate::error::AppError;
+use crate::error::Result;
 
+#[cfg(windows)]
 pub fn create() -> Result<PathBuf> {
+    let base = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("glassferry").join("run");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+#[cfg(unix)]
+pub fn create() -> Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
     let uid = unsafe { libc::getuid() };
     let dir = match std::env::var_os("XDG_RUNTIME_DIR") {
         Some(base) if cfg!(target_os = "linux") => PathBuf::from(base).join("gf"),
@@ -50,13 +64,11 @@ pub fn remove_stale_files(dir: &std::path::Path) {
             .unwrap_or(&name)
             .split(|c: char| !c.is_ascii_digit())
             .next()
-            .and_then(|p| p.parse::<libc::pid_t>().ok());
+            .and_then(|p| p.parse::<u32>().ok());
         let Some(pid) = pid else {
             continue;
         };
-        let alive = unsafe { libc::kill(pid, 0) } == 0
-            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
-        if !alive {
+        if !crate::platform::process_alive(pid) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
@@ -64,8 +76,7 @@ pub fn remove_stale_files(dir: &std::path::Path) {
 
 /// Random hex token read from the OS CSPRNG.
 pub fn random_token() -> Result<String> {
-    use std::io::Read;
     let mut bytes = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    getrandom::fill(&mut bytes).map_err(|e| crate::error::AppError::Other(format!("random: {e}")))?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }

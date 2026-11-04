@@ -123,6 +123,9 @@ impl Logger {
     pub fn default_dir() -> Option<PathBuf> {
         if cfg!(target_os = "macos") {
             dirs::home_dir().map(|h| h.join("Library/Logs/Glassferry"))
+        } else if cfg!(windows) {
+            // Windows has no state dir: %LOCALAPPDATA%\glassferry\logs.
+            dirs::data_local_dir().map(|d| d.join("glassferry").join("logs"))
         } else {
             dirs::state_dir().map(|d| d.join("glassferry/logs"))
         }

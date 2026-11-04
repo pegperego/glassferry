@@ -140,6 +140,7 @@ pub mod remote {
 pub mod local {
     use super::*;
 
+    #[cfg(unix)]
     async fn run(logger: &Arc<Logger>, op_name: &str, script: &str, args: &[String]) -> Result<()> {
         let mut op = logger.start(None, Channel::Local, op_name, args.join(" "));
         let mut line = vec!["sh".to_string(), "-c".into(), script.to_string(), "sh".into()];
@@ -164,12 +165,46 @@ pub mod local {
         op.result(result, |_| None)
     }
 
+    /// Windows: the system `tar.exe` (bsdtar, also reads zip), no shell.
+    #[cfg(windows)]
+    async fn tar(logger: &Arc<Logger>, op_name: &str, args: &[&str]) -> Result<()> {
+        let mut op = logger.start(None, Channel::Local, op_name, args.join(" "));
+        op.equivalent(shell_line(std::iter::once("tar").chain(args.iter().copied())));
+        let mut command = tokio::process::Command::new("tar.exe");
+        crate::platform::no_window(&mut command);
+        let result = command
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .await
+            .map_err(AppError::from)
+            .and_then(|output| {
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(AppError::Other(String::from_utf8_lossy(&output.stderr).trim().to_string()))
+                }
+            });
+        op.result(result, |_| None)
+    }
+
     pub async fn compress(logger: &Arc<Logger>, dir: &str, names: &[String], archive: &str) -> Result<()> {
         let args = compress_args(dir, names, archive)?;
         if std::fs::symlink_metadata(&args[0]).is_ok() {
             return Err(AppError::Other(format!("{archive} esiste già")));
         }
-        run(logger, "tar", COMPRESS, &args).await
+        #[cfg(unix)]
+        return run(logger, "tar", COMPRESS, &args).await;
+        #[cfg(windows)]
+        {
+            let mut tar_args = vec!["-czf", args[0].as_str(), "-C", args[1].as_str()];
+            tar_args.extend(args[2..].iter().map(String::as_str));
+            let result = tar(logger, "tar", &tar_args).await;
+            if result.is_err() {
+                let _ = std::fs::remove_file(&args[0]);
+            }
+            result
+        }
     }
 
     pub async fn extract(logger: &Arc<Logger>, dir: &str, name: &str) -> Result<String> {
@@ -177,7 +212,14 @@ pub mod local {
         if std::fs::symlink_metadata(&args[1]).is_ok() {
             return Err(AppError::Other(format!("la cartella {folder} esiste già")));
         }
+        #[cfg(unix)]
         run(logger, tool(kind), script, &args).await?;
+        #[cfg(windows)]
+        {
+            let _ = (kind, script);
+            std::fs::create_dir(&args[1])?;
+            tar(logger, "tar", &["-xf", &args[0], "-C", &args[1]]).await?;
+        }
         Ok(folder)
     }
 }

@@ -12,21 +12,31 @@
 //! `open -a` for Terminal, iTerm2 and Ghostty (they run a `.command` file,
 //! no automation permission needed), the bundled binary for WezTerm, kitty, Alacritty, the command in the PATH
 //! on Linux. Any other terminal: a custom command with `{script}`.
+//!
+//! Windows has no script: the app starts PowerShell (local folder) or ssh
+//! (remote) itself in a new console window, which Windows 11 shows in
+//! Windows Terminal when that is the default terminal. Rust quotes the
+//! arguments, so the remote command needs no cmd or PowerShell quoting.
 
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use tokio::process::Command;
 
-use crate::error::{AppError, Result};
+#[cfg(unix)]
+use crate::error::AppError;
+use crate::error::Result;
 use crate::log::shell_line;
 use crate::session::sh_quote;
 
 pub const PLACEHOLDER: &str = "{script}";
 
-/// How a terminal runs the script.
+/// How a terminal runs the script (Windows has no known terminals: see `open_console`).
 #[derive(Clone, Copy)]
+#[cfg_attr(windows, allow(dead_code))]
 enum Start {
     /// `open -a <app> <script>`: the app opens the `.command` file.
     /// Ghostty too: `open -na Ghostty.app --args -e` would start a second
@@ -37,6 +47,7 @@ enum Start {
     Exec(&'static [&'static str]),
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 struct Known {
     id: &'static str,
     name: &'static str,
@@ -57,7 +68,10 @@ const KNOWN: &[Known] = &[
     Known { id: "alacritty", name: "Alacritty", install: "Alacritty.app", binary: "Contents/MacOS/alacritty", start: Start::Exec(&["-e"]) },
 ];
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+const KNOWN: &[Known] = &[];
+
+#[cfg(all(unix, not(target_os = "macos")))]
 const KNOWN: &[Known] = &[
     Known { id: "x-terminal-emulator", name: "Predefinito di sistema (x-terminal-emulator)", install: "x-terminal-emulator", binary: "", start: Start::Exec(&["-e"]) },
     Known { id: "gnome-terminal", name: "GNOME Terminal", install: "gnome-terminal", binary: "", start: Start::Exec(&["--"]) },
@@ -110,6 +124,7 @@ pub fn installed() -> Vec<TerminalApp> {
 }
 
 /// `app` as stored: an id, or a name from older settings ("Terminal", "iTerm").
+#[cfg(unix)]
 fn known(app: &str) -> Option<&'static Known> {
     KNOWN
         .iter()
@@ -174,16 +189,59 @@ pub fn remote_script(ssh_line: &str) -> String {
     format!("#!/bin/sh\nrm -f -- \"$0\"\nexec {ssh_line}\n")
 }
 
-/// Writes the script and hands it to the terminal; returns the command used.
-pub async fn open(settings: &TerminalSettings, runtime_dir: &Path, script: &str) -> Result<String> {
-    let path = write_script(runtime_dir, script)?;
-    let result = launch(settings, &path).await;
-    if result.is_err() {
-        let _ = std::fs::remove_file(&path);
-    }
-    result
+/// What the terminal opens.
+pub enum Job<'a> {
+    Local { dir: &'a str },
+    Remote { ssh_bin: &'a Path, config_file: Option<&'a Path>, alias: &'a str, path: &'a str },
 }
 
+/// Opens the terminal for `job`; returns the command used (for the log).
+pub async fn open(settings: &TerminalSettings, runtime_dir: &Path, job: Job<'_>) -> Result<String> {
+    #[cfg(windows)]
+    {
+        let _ = (settings, runtime_dir);
+        open_console(job)
+    }
+    #[cfg(unix)]
+    {
+        let script = match job {
+            Job::Local { dir } => local_script(dir),
+            Job::Remote { ssh_bin, config_file, alias, path } => remote_script(&ssh_line(ssh_bin, config_file, alias, path)),
+        };
+        let path = write_script(runtime_dir, &script)?;
+        let result = launch(settings, &path).await;
+        if result.is_err() {
+            let _ = std::fs::remove_file(&path);
+        }
+        result
+    }
+}
+
+/// Windows: PowerShell in the folder, or ssh, in a new console window.
+#[cfg(windows)]
+fn open_console(job: Job<'_>) -> Result<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    let (mut command, line) = match job {
+        Job::Local { dir } => {
+            let mut command = std::process::Command::new("powershell.exe");
+            command.args(["-NoLogo", "-NoExit"]).current_dir(dir);
+            (command, format!("powershell.exe -NoLogo -NoExit (in {dir})"))
+        }
+        Job::Remote { ssh_bin, config_file, alias, path } => {
+            let mut command = std::process::Command::new(ssh_bin);
+            if let Some(file) = config_file {
+                command.arg("-F").arg(file);
+            }
+            command.args(["-t", "-o", "RemoteCommand=none", "--", alias]).arg(remote_command(path));
+            (command, ssh_line(ssh_bin, config_file, alias, path))
+        }
+    };
+    command.creation_flags(CREATE_NEW_CONSOLE).spawn()?;
+    Ok(line)
+}
+
+#[cfg(unix)]
 fn write_script(runtime_dir: &Path, script: &str) -> Result<PathBuf> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -199,6 +257,7 @@ fn write_script(runtime_dir: &Path, script: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+#[cfg(unix)]
 async fn launch(settings: &TerminalSettings, script: &Path) -> Result<String> {
     let script_arg = script.to_string_lossy().into_owned();
     if let Some(command) = &settings.command {
@@ -252,6 +311,7 @@ async fn launch(settings: &TerminalSettings, script: &Path) -> Result<String> {
 }
 
 /// Starts the terminal without waiting for it (it runs until closed).
+#[cfg(unix)]
 fn spawn(command: &mut Command) -> Result<()> {
     command
         .stdin(std::process::Stdio::null())
@@ -266,6 +326,7 @@ mod tests {
     use super::*;
 
     /// A fake login shell that prints where it starts.
+    #[cfg(unix)]
     fn fake_shell(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let shell = dir.join("fake-shell");
@@ -274,6 +335,7 @@ mod tests {
         shell
     }
 
+    #[cfg(unix)]
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("gf-terminal-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -281,6 +343,7 @@ mod tests {
         dir
     }
 
+    #[cfg(unix)]
     #[test]
     fn local_script_starts_the_shell_in_the_folder_and_removes_itself() {
         let dir = scratch("local");
@@ -294,6 +357,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn remote_command_survives_the_login_shell() {
         // What the remote login shell runs, here with a local sh.
@@ -311,6 +375,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn finds_terminals_by_id_or_old_names() {
         let first = &KNOWN[0];

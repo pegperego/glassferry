@@ -4,6 +4,7 @@
 //! system's user database answers, through a small cache.
 
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::sync::Mutex;
 
 #[derive(Debug, Default)]
@@ -35,9 +36,12 @@ fn parse_db(text: &str) -> HashMap<u32, String> {
     map
 }
 
+#[cfg(unix)]
 static LOCAL_USERS: Mutex<Option<HashMap<u32, Option<String>>>> = Mutex::new(None);
+#[cfg(unix)]
 static LOCAL_GROUPS: Mutex<Option<HashMap<u32, Option<String>>>> = Mutex::new(None);
 
+#[cfg(unix)]
 pub fn local_user(uid: u32) -> Option<String> {
     cached(&LOCAL_USERS, uid, |id| unsafe {
         let pw = libc::getpwuid(id);
@@ -45,6 +49,7 @@ pub fn local_user(uid: u32) -> Option<String> {
     })
 }
 
+#[cfg(unix)]
 pub fn local_group(gid: u32) -> Option<String> {
     cached(&LOCAL_GROUPS, gid, |id| unsafe {
         let gr = libc::getgrgid(id);
@@ -52,8 +57,20 @@ pub fn local_group(gid: u32) -> Option<String> {
     })
 }
 
+/// Windows files have no numeric owner (see `platform::owner`).
+#[cfg(windows)]
+pub fn local_user(_uid: u32) -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+pub fn local_group(_gid: u32) -> Option<String> {
+    None
+}
+
 /// The lookup runs under the cache lock: getpwuid/getgrgid return static
 /// buffers, so calls must not overlap.
+#[cfg(unix)]
 fn cached(cache: &Mutex<Option<HashMap<u32, Option<String>>>>, id: u32, lookup: impl Fn(u32) -> Option<String>) -> Option<String> {
     let mut guard = cache.lock().unwrap();
     guard.get_or_insert_with(HashMap::new).entry(id).or_insert_with(|| lookup(id)).clone()
@@ -75,6 +92,7 @@ mod tests {
         assert_eq!(names.users.len(), 2);
     }
 
+    #[cfg(unix)]
     #[test]
     fn resolves_local_ids() {
         assert_eq!(local_user(0).as_deref(), Some("root"));

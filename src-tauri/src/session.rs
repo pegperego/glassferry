@@ -387,6 +387,7 @@ impl Session {
     }
 
     pub(crate) async fn read_dir(&self, path: &Path) -> Result<Vec<FileEntry>> {
+        let path_str = path.to_string_lossy();
         let mut fs = self.sftp.fs();
         let dir = fs.open_dir(path).await?;
         let raw: Vec<_> = dir.read_dir().try_collect().await?;
@@ -406,7 +407,8 @@ impl Session {
                 _ => EntryKind::Other,
             };
             let target_is_dir = if matches!(kind, EntryKind::Symlink) {
-                fs.metadata(path.join(&name))
+                // A remote path is POSIX: `Path::join` would use `\` on Windows.
+                fs.metadata(format!("{}/{name}", path_str.trim_end_matches('/')))
                     .await
                     .ok()
                     .and_then(|m| m.file_type())

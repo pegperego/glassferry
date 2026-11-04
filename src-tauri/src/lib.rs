@@ -12,6 +12,7 @@ pub mod ids;
 pub mod local;
 pub mod log;
 pub mod plan;
+pub mod platform;
 pub mod search;
 pub mod runtime_dir;
 pub mod session;
@@ -275,21 +276,33 @@ fn settings_save(state: State<'_, AppState>, settings: settings::Settings) -> Re
 #[tauri::command]
 async fn open_terminal(state: State<'_, AppState>, target: Target, path: String) -> Result<()> {
     let settings = state.settings.lock().unwrap().terminal.clone();
-    let (host, script, equivalent) = match target {
-        Target::Local => (None, terminal::local_script(&path), format!("cd {}", log::shell_line([&path]))),
+    let session = match target {
+        Target::Local => None,
         Target::Remote { session_id } => {
             let session = state.session(session_id)?;
             if !session.capabilities.shell {
                 return Err(AppError::Other("account solo SFTP: il server non concede una shell".into()));
             }
+            Some(session)
+        }
+    };
+    let (host, job, equivalent) = match &session {
+        None => (None, terminal::Job::Local { dir: &path }, format!("cd {}", log::shell_line([&path]))),
+        Some(session) => {
             let launcher = &session.launcher;
+            let job = terminal::Job::Remote {
+                ssh_bin: &launcher.ssh_bin,
+                config_file: launcher.config_file.as_deref(),
+                alias: &launcher.alias,
+                path: &path,
+            };
             let line = terminal::ssh_line(&launcher.ssh_bin, launcher.config_file.as_deref(), &launcher.alias, &path);
-            (Some(launcher.label.clone()), terminal::remote_script(&line), line)
+            (Some(launcher.label.clone()), job, line)
         }
     };
     let mut op = state.logger.start(host.as_deref(), log::Channel::Local, "terminal", &path);
     op.equivalent(equivalent);
-    op.result(terminal::open(&settings, &state.runtime_dir, &script).await, |how| Some(how.clone()))?;
+    op.result(terminal::open(&settings, &state.runtime_dir, job).await, |how| Some(how.clone()))?;
     Ok(())
 }
 

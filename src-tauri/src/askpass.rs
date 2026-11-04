@@ -2,7 +2,7 @@
 //!
 //! The application binary doubles as the askpass helper: ssh runs it with
 //! `GF_ASKPASS_SOCKET` set, the helper forwards the prompt over a Unix socket
-//! to the running app, which shows a dialog in the UI and sends the answer
+//! (on Windows a named pipe, `\\.\pipe\glassferry-askpass-…`) to the running app, which shows a dialog in the UI and sends the answer
 //! back. The helper prints it on stdout (or exits 1 when cancelled), which is
 //! the contract ssh expects from an askpass program.
 //!
@@ -17,8 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::oneshot;
 
 use crate::error::Result;
@@ -122,14 +121,35 @@ fn helper(socket: &Path) -> std::io::Result<Option<String>> {
         prompt: std::env::args().nth(1).unwrap_or_default(),
         hint: std::env::var("SSH_ASKPASS_PROMPT").unwrap_or_default(),
     };
+    #[cfg(unix)]
     let mut stream = std::os::unix::net::UnixStream::connect(socket)?;
+    // A named pipe opens like a file.
+    #[cfg(windows)]
+    let mut stream = open_pipe(socket)?;
     serde_json::to_writer(&mut stream, &request)?;
     stream.write_all(b"\n")?;
 
     let mut line = String::new();
-    std::io::BufReader::new(stream).read_line(&mut line)?;
+    std::io::BufReader::new(&mut stream).read_line(&mut line)?;
     let response: HelperResponse = serde_json::from_str(&line)?;
     Ok(response.value)
+}
+
+/// Opens the app's pipe; while every instance is busy (another prompt
+/// being connected), waits a little and retries.
+#[cfg(windows)]
+fn open_pipe(name: &Path) -> std::io::Result<std::fs::File> {
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let mut tries = 0;
+    loop {
+        match std::fs::OpenOptions::new().read(true).write(true).open(name) {
+            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) && tries < 40 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            other => return other,
+        }
+    }
 }
 
 impl PromptKind {
@@ -172,15 +192,24 @@ impl AskpassServer {
     /// `notify` is called for every prompt that must be shown to the user.
     pub fn start(runtime_dir: &Path, notify: Notifier, logger: Arc<Logger>) -> Result<Arc<Self>> {
         crate::runtime_dir::remove_stale_files(runtime_dir);
-        let socket_path = runtime_dir.join(format!("askpass-{}.sock", std::process::id()));
-        let _ = std::fs::remove_file(&socket_path);
-        // Bound with std: `start` may run outside the Tokio runtime (Tauri setup).
-        let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
-        listener.set_nonblocking(true)?;
+        let token = crate::runtime_dir::random_token()?;
+        #[cfg(unix)]
+        let (socket_path, listener) = {
+            let socket_path = runtime_dir.join(format!("askpass-{}.sock", std::process::id()));
+            let _ = std::fs::remove_file(&socket_path);
+            // Bound with std: `start` may run outside the Tokio runtime (Tauri setup).
+            let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
+            listener.set_nonblocking(true)?;
+            (socket_path, listener)
+        };
+        // Part of the token in the name: another process cannot guess it to
+        // create the pipe first (`first_pipe_instance` would then fail).
+        #[cfg(windows)]
+        let socket_path = PathBuf::from(format!(r"\\.\pipe\glassferry-askpass-{}-{}", std::process::id(), &token[..8]));
 
         let server = Arc::new(Self {
             socket_path,
-            token: crate::runtime_dir::random_token()?,
+            token,
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             attempts: Mutex::new(HashMap::new()),
@@ -189,8 +218,9 @@ impl AskpassServer {
         });
 
         let accept_server = server.clone();
+        #[cfg(unix)]
         tauri::async_runtime::spawn(async move {
-            let listener = match UnixListener::from_std(listener) {
+            let listener = match tokio::net::UnixListener::from_std(listener) {
                 Ok(listener) => listener,
                 Err(e) => {
                     eprintln!("askpass listener error: {e}");
@@ -198,15 +228,39 @@ impl AskpassServer {
                 }
             };
             while let Ok((stream, _)) = listener.accept().await {
-                let server = accept_server.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = server.handle(stream).await {
-                        eprintln!("askpass connection error: {e}");
-                    }
-                });
+                accept_server.clone().serve(stream);
+            }
+        });
+        #[cfg(windows)]
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = accept_server.clone().accept_pipes().await {
+                eprintln!("askpass pipe error: {e}");
             }
         });
         Ok(server)
+    }
+
+    /// One pipe instance per helper: a new one is created as soon as a
+    /// helper connects, so the next prompt can come in.
+    #[cfg(windows)]
+    async fn accept_pipes(self: Arc<Self>) -> std::io::Result<()> {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let name = self.socket_path.as_os_str().to_owned();
+        let mut pipe = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&name)?;
+        loop {
+            pipe.connect().await?;
+            let connected = pipe;
+            pipe = ServerOptions::new().reject_remote_clients(true).create(&name)?;
+            self.clone().serve(connected);
+        }
+    }
+
+    fn serve<S: AsyncRead + AsyncWrite + Send + 'static>(self: Arc<Self>, stream: S) {
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = self.handle(stream).await {
+                eprintln!("askpass connection error: {e}");
+            }
+        });
     }
 
     /// Starts tracking one connect; returns the id to pass to `env_for`.
@@ -244,7 +298,9 @@ impl AskpassServer {
     }
 
     /// Removes the socket file; called on app exit, when Drop never runs.
+    /// (A named pipe goes away with the process.)
     pub fn remove_socket(&self) {
+        #[cfg(unix)]
         let _ = std::fs::remove_file(&self.socket_path);
     }
 
@@ -281,8 +337,8 @@ impl AskpassServer {
         (None, attempt.options.save_enabled, has_saved)
     }
 
-    async fn handle(&self, stream: UnixStream) -> std::io::Result<()> {
-        let (read, mut write) = stream.into_split();
+    async fn handle<S: AsyncRead + AsyncWrite>(&self, stream: S) -> std::io::Result<()> {
+        let (read, mut write) = tokio::io::split(stream);
         let mut line = String::new();
         BufReader::new(read).read_line(&mut line).await?;
         let request: HelperRequest = serde_json::from_str(&line)?;
@@ -345,7 +401,7 @@ impl AskpassServer {
 
 impl Drop for AskpassServer {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket_path);
+        self.remove_socket();
     }
 }
 
@@ -370,7 +426,23 @@ mod tests {
 
     /// Sends one prompt as the helper would and returns the answer.
     async fn ask(server: &AskpassServer, attempt: u64, prompt: &str) -> Option<String> {
-        let mut stream = UnixStream::connect(&server.socket_path).await.unwrap();
+        #[cfg(unix)]
+        let mut stream = tokio::net::UnixStream::connect(&server.socket_path).await.unwrap();
+        // The pipe is created by a task: wait for it.
+        #[cfg(windows)]
+        let mut stream = {
+            let mut tries = 0;
+            loop {
+                match tokio::net::windows::named_pipe::ClientOptions::new().open(&server.socket_path) {
+                    Ok(stream) => break stream,
+                    Err(_) if tries < 100 => {
+                        tries += 1;
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            }
+        };
         let request = HelperRequest {
             token: server.token.clone(),
             alias: "web".into(),

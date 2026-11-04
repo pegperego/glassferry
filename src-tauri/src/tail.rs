@@ -246,7 +246,12 @@ impl TailManager {
         lines: u32,
         from_offset: Option<u64>,
     ) -> Result<TailStarted> {
-        if !Path::new(&path).is_absolute() {
+        // Remote paths are POSIX (`Path::is_absolute` wants a drive on Windows).
+        let absolute = match &target {
+            TailTarget::Local => Path::new(&path).is_absolute(),
+            TailTarget::Remote(..) => path.starts_with('/'),
+        };
+        if !absolute {
             return Err(AppError::Other(format!("percorso non assoluto: {path}")));
         }
         let method = match &target {
@@ -709,6 +714,7 @@ mod tests {
         assert!(!looks_binary(b"plain text\n"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn scripts_run_on_this_system() {
         let dir = std::env::temp_dir().join(format!("gf-tail-test-{}", std::process::id()));

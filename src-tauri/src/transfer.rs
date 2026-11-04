@@ -975,7 +975,6 @@ fn scan_local(src_dir: &Path, names: &[String]) -> Result<Plan> {
                 visit(base, format!("{rel}/{child}"), plan)?;
             }
         } else if meta.is_file() {
-            use std::os::unix::fs::PermissionsExt;
             plan.files.push(PlannedFile {
                 rel,
                 size: meta.len(),
@@ -984,7 +983,7 @@ fn scan_local(src_dir: &Path, names: &[String]) -> Result<Plan> {
                     .ok()
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                     .map(|d| d.as_secs()),
-                permissions: Some(meta.permissions().mode() & 0o777),
+                permissions: crate::platform::mode(&meta).map(|m| m & 0o777),
             });
         }
         Ok(())
@@ -1143,8 +1142,7 @@ async fn download(job: &Job, src: &str, dst: &Path, file: &PlannedFile, offset: 
     if let Some(mode) = file.permissions {
         // Only for new files: an overwritten file keeps the user's mode.
         if !dst.exists() {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&part, std::fs::Permissions::from_mode(mode));
+            let _ = crate::platform::set_mode(&part, mode);
         }
     }
     tokio::fs::rename(&part, dst).await?;
@@ -1473,6 +1471,7 @@ mod tests {
         assert_eq!(prefix.complete(140, 5), 130);
     }
 
+    #[cfg(unix)]
     #[test]
     fn scans_local_tree_parents_first_and_skips_dir_symlinks() {
         let dir = std::env::temp_dir().join(format!("gf-scan-{}", std::process::id()));

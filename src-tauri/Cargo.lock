@@ -1479,6 +1479,7 @@ dependencies = [
  "chrono",
  "dirs",
  "futures-util",
+ "getrandom 0.3.4",
  "glob",
  "keyring",
  "libc",
@@ -1496,6 +1497,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "trash",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2223,11 +2225,13 @@ version = "3.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
 dependencies = [
+ "byteorder",
  "dbus-secret-service",
  "log",
  "secret-service",
  "security-framework 2.11.1",
  "security-framework 3.7.0",
+ "windows-sys 0.60.2",
  "zeroize",
 ]
 

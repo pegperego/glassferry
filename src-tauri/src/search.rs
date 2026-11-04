@@ -246,8 +246,7 @@ pub mod local {
     }
 
     pub(super) fn walk(dir: &str, pattern: &str, kind: SearchKind, cancel: &Cancel) -> Result<SearchResult> {
-        use std::os::unix::fs::MetadataExt;
-        let device = std::fs::metadata(dir)?.dev();
+        let device = crate::platform::device(&std::fs::metadata(dir)?);
         let mut result = SearchResult { matches: Vec::new(), truncated: false, partial: false, method: "local" };
         let mut queue = VecDeque::from([dir.to_string()]);
         let mut visited = 0;
@@ -277,7 +276,7 @@ pub mod local {
                     result.matches.push(SearchMatch { path: path.clone(), dir: meta.is_dir() });
                 }
                 // Same filesystem only, like find -xdev.
-                if meta.is_dir() && meta.dev() == device {
+                if meta.is_dir() && crate::platform::device(&meta) == device {
                     queue.push_back(path);
                 }
             }
@@ -314,6 +313,7 @@ mod tests {
         assert!(!remote::find_script(SearchKind::Dir).contains("! -type d"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn find_script_runs_on_this_system() {
         let dir = std::env::temp_dir().join(format!("gf-search-find-{}", std::process::id()));
@@ -333,6 +333,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn local_walk_finds_and_stops() {
         let dir = std::env::temp_dir().join(format!("gf-search-{}", std::process::id()));

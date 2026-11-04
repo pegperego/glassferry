@@ -70,6 +70,8 @@ pub enum TailMethod {
     Tail,
     /// Polling over SFTP.
     Sftp,
+    /// Polling a local file (Windows).
+    Poll,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -255,6 +257,8 @@ impl TailManager {
             return Err(AppError::Other(format!("percorso non assoluto: {path}")));
         }
         let method = match &target {
+            // Windows has no `tail`: the local file is polled.
+            TailTarget::Local if cfg!(windows) => TailMethod::Poll,
             TailTarget::Local => TailMethod::Tail,
             TailTarget::Remote(_, session) => {
                 let forced_sftp = std::env::var(STRATEGY_ENV).is_ok_and(|v| v == "sftp");
@@ -280,14 +284,18 @@ impl TailManager {
             let request = Request { path: &path, lines, from_offset };
             let result = match (&target, method) {
                 (TailTarget::Remote(_, session), TailMethod::Sftp) => {
-                    sftp_tail(session, &request, &cancel, &mut emitter).await
+                    sftp_tail(Source::Sftp(session), &manager.logger, &request, &cancel, &mut emitter).await
                 }
                 (TailTarget::Remote(_, session), TailMethod::Tail) => {
                     shell_tail(&Runner::Remote(session), &manager.logger, &request, &cancel, &mut emitter).await
                 }
+                (TailTarget::Local, TailMethod::Poll) => {
+                    sftp_tail(Source::Local, &manager.logger, &request, &cancel, &mut emitter).await
+                }
                 (TailTarget::Local, _) => {
                     shell_tail(&Runner::Local, &manager.logger, &request, &cancel, &mut emitter).await
                 }
+                (TailTarget::Remote(..), TailMethod::Poll) => unreachable!("remote files use SFTP"),
             };
             emitter.flush();
             manager.running.lock().unwrap().remove(&tail_id);
@@ -493,13 +501,16 @@ async fn shell_tail(runner: &Runner<'_>, logger: &Arc<Logger>, request: &Request
     result
 }
 
-/// SFTP path: the last lines, then polling.
-async fn sftp_tail(session: &Session, request: &Request<'_>, cancel: &Cancel, emitter: &mut Emitter) -> Result<()> {
+/// Polling path (SFTP, or a local file on Windows): the last lines, then polling.
+async fn sftp_tail(source: Source<'_>, logger: &Arc<Logger>, request: &Request<'_>, cancel: &Cancel, emitter: &mut Emitter) -> Result<()> {
     let path = request.path;
-    let mut log = session.launcher.log(Channel::Sftp, "tail", path);
+    let mut log = match source {
+        Source::Sftp(session) => session.launcher.log(Channel::Sftp, "tail", path),
+        Source::Local => logger.start(None, Channel::Local, "tail", path),
+    };
     log.equivalent(format!("tail -n {} -F {}", request.lines, shell_line([path])));
     let mut stats = SftpStats::default();
-    let result = sftp_loop(session, request, cancel, emitter, &mut stats).await;
+    let result = sftp_loop(source, request, cancel, emitter, &mut stats).await;
     let summary = format!("{} byte letti in {} richieste, fermo a {}", stats.bytes, stats.requests, emitter.offset);
     match &result {
         Ok(()) | Err(AppError::Cancelled) => log.ok(Some(summary)),
@@ -514,19 +525,44 @@ struct SftpStats {
     bytes: u64,
 }
 
+/// Where the polling reads: a session over SFTP, or a local file (Windows,
+/// which has no `tail`).
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Sftp(&'a Session),
+    #[cfg_attr(unix, allow(dead_code))]
+    Local,
+}
+
 fn is_not_found(error: &AppError) -> bool {
     use openssh_sftp_client::error::SftpErrorKind;
     matches!(error, AppError::Sftp(openssh_sftp_client::Error::SftpError(SftpErrorKind::NoSuchFile, _)))
+        || matches!(error, AppError::Io(e) if e.kind() == std::io::ErrorKind::NotFound)
 }
 
-async fn file_size(session: &Session, path: &str, stats: &mut SftpStats) -> Result<u64> {
+async fn file_size(source: Source<'_>, path: &str, stats: &mut SftpStats) -> Result<u64> {
     stats.requests += 1;
-    let meta = session.sftp.fs().metadata(path).await?;
-    Ok(meta.len().unwrap_or(0))
+    match source {
+        Source::Sftp(session) => Ok(session.sftp.fs().metadata(path).await?.len().unwrap_or(0)),
+        Source::Local => Ok(tokio::fs::metadata(path).await?.len()),
+    }
 }
 
 /// Reads `len` bytes at `offset` (fewer at end of file).
-async fn read_range(session: &Session, path: &str, offset: u64, len: u64, stats: &mut SftpStats) -> Result<Vec<u8>> {
+async fn read_range(source: Source<'_>, path: &str, offset: u64, len: u64, stats: &mut SftpStats) -> Result<Vec<u8>> {
+    let session = match source {
+        Source::Sftp(session) => session,
+        Source::Local => {
+            use tokio::io::{AsyncReadExt, AsyncSeekExt};
+            let mut file = tokio::fs::File::open(path).await?;
+            file.seek(SeekFrom::Start(offset)).await?;
+            let mut out = Vec::with_capacity(len as usize);
+            file.take(len).read_to_end(&mut out).await?;
+            stats.requests += 1;
+            stats.bytes += out.len() as u64;
+            return Ok(out);
+        }
+    };
     let mut file = session.sftp.open(path).await?;
     stats.requests += 2;
     Pin::new(&mut file).start_seek(SeekFrom::Start(offset))?;
@@ -552,27 +588,27 @@ struct Head {
     hash: [u8; 32],
 }
 
-async fn read_head(session: &Session, path: &str, len: u64, stats: &mut SftpStats) -> Result<Option<Head>> {
+async fn read_head(source: Source<'_>, path: &str, len: u64, stats: &mut SftpStats) -> Result<Option<Head>> {
     if len == 0 {
         return Ok(None);
     }
-    let data = read_range(session, path, 0, len.min(HEAD_BYTES), stats).await?;
+    let data = read_range(source, path, 0, len.min(HEAD_BYTES), stats).await?;
     Ok(Some(Head { len: data.len() as u64, hash: Sha256::digest(&data).into() }))
 }
 
-async fn sftp_loop(session: &Session, request: &Request<'_>, cancel: &Cancel, emitter: &mut Emitter, stats: &mut SftpStats) -> Result<()> {
+async fn sftp_loop(source: Source<'_>, request: &Request<'_>, cancel: &Cancel, emitter: &mut Emitter, stats: &mut SftpStats) -> Result<()> {
     let path = request.path;
     let mut offset = match request.from_offset {
         Some(offset) => offset,
         None => {
-            let size = file_size(session, path, stats).await?;
+            let size = file_size(source, path, stats).await?;
             // Blocks from the end until there are enough lines.
             let mut start = size;
             let mut data = Vec::new();
             loop {
                 let block = (64 * 1024).min(start);
                 start -= block;
-                let mut chunk = read_range(session, path, start, block, stats).await?;
+                let mut chunk = read_range(source, path, start, block, stats).await?;
                 chunk.extend_from_slice(&data);
                 data = chunk;
                 let newlines = data.iter().filter(|&&b| b == b'\n').count();
@@ -591,8 +627,8 @@ async fn sftp_loop(session: &Session, request: &Request<'_>, cancel: &Cancel, em
         }
     };
 
-    let mut size = file_size(session, path, stats).await?;
-    let mut head = read_head(session, path, size, stats).await?;
+    let mut size = file_size(source, path, stats).await?;
+    let mut head = read_head(source, path, size, stats).await?;
     let mut splitter = LineSplitter::default();
     let mut interval = POLL_MIN;
     let mut missing = false;
@@ -601,7 +637,7 @@ async fn sftp_loop(session: &Session, request: &Request<'_>, cancel: &Cancel, em
             _ = cancel.cancelled() => return Err(AppError::Cancelled),
             _ = tokio::time::sleep(interval) => {}
         }
-        size = match file_size(session, path, stats).await {
+        size = match file_size(source, path, stats).await {
             Ok(size) => size,
             Err(e) if is_not_found(&e) => {
                 if !missing {
@@ -625,12 +661,12 @@ async fn sftp_loop(session: &Session, request: &Request<'_>, cancel: &Cancel, em
             && let Some(known) = &head
         {
             // New data: is it still the same file? (one small read)
-            let current = read_head(session, path, known.len, stats).await?;
+            let current = read_head(source, path, known.len, stats).await?;
             if current.as_ref() != Some(known) {
                 emitter.notice("— file sostituito (ruotato): segue il nuovo —");
                 restarted = true;
             } else if known.len < HEAD_BYTES && size > known.len {
-                head = read_head(session, path, size, stats).await?;
+                head = read_head(source, path, size, stats).await?;
             }
         }
         if restarted {
@@ -639,11 +675,11 @@ async fn sftp_loop(session: &Session, request: &Request<'_>, cancel: &Cancel, em
             emitter.offset = 0;
         }
         if head.is_none() || restarted {
-            head = read_head(session, path, size, stats).await?;
+            head = read_head(source, path, size, stats).await?;
         }
         if size > offset {
             let len = (size - offset).min(READ_CHUNK);
-            let data = read_range(session, path, offset, len, stats).await?;
+            let data = read_range(source, path, offset, len, stats).await?;
             offset += data.len() as u64;
             let mut lines = Vec::new();
             splitter.push(&data, &mut lines);
@@ -706,6 +742,54 @@ mod tests {
         // An unfinished last line waits.
         assert_eq!(last_lines(b"1\n2\npartial", 10, true), vec!["1", "2"]);
         assert!(last_lines(b"", 10, true).is_empty());
+    }
+
+    /// The polling path on a local file (Windows uses it for local files).
+    #[test]
+    fn polls_a_local_file() {
+        tauri::async_runtime::block_on(async {
+            let dir = std::env::temp_dir().join(format!("gf-tail-poll-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join("app.log");
+            std::fs::write(&file, "one\ntwo\nthree\n").unwrap();
+            let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+            let sink_seen = seen.clone();
+            let mut emitter = Emitter {
+                tail_id: 1,
+                sink: Arc::new(move |event| {
+                    if let TailEvent::Lines { lines, .. } = event {
+                        sink_seen.lock().unwrap().extend(lines);
+                    }
+                }),
+                pending: Vec::new(),
+                offset: 0,
+                last: Instant::now(),
+            };
+            let cancel = Arc::new(Cancel::default());
+            let path = file.to_string_lossy().into_owned();
+            let writer = {
+                let (file, cancel, seen) = (file.clone(), cancel.clone(), seen.clone());
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    std::io::Write::write_all(&mut std::fs::OpenOptions::new().append(true).open(&file).unwrap(), b"four\n").unwrap();
+                    for _ in 0..50 {
+                        if seen.lock().unwrap().iter().any(|l| l == "four") {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    cancel.cancel();
+                })
+            };
+            let request = Request { path: &path, lines: 2, from_offset: None };
+            let logger = Logger::new(None, None);
+            let result = sftp_tail(Source::Local, &logger, &request, &cancel, &mut emitter).await;
+            writer.await.unwrap();
+            assert!(matches!(result, Err(AppError::Cancelled)));
+            assert_eq!(*seen.lock().unwrap(), vec!["two", "three", "four"]);
+            assert_eq!(emitter.offset, 19);
+            let _ = std::fs::remove_dir_all(&dir);
+        });
     }
 
     #[test]

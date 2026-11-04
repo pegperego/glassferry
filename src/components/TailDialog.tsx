@@ -10,6 +10,7 @@ const ROW_HEIGHT = 18;
 const METHOD: Record<string, string> = {
   tail: "tail -F",
   sftp: "SFTP, controllo ogni 0,5–3 s (account senza shell)",
+  poll: "controllo ogni 0,5–3 s",
 };
 
 interface Props {

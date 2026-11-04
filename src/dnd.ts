@@ -22,7 +22,9 @@ export function groupByParent(paths: string[]): Map<string, string[]> {
     const trimmed = path.replace(/\/+$/, "");
     const index = trimmed.lastIndexOf("/");
     if (index < 0) continue;
-    const dir = index === 0 ? "/" : trimmed.slice(0, index);
+    let dir = index === 0 ? "/" : trimmed.slice(0, index);
+    // A Windows drive root ("C:/x" → "C:/", not the drive-relative "C:").
+    if (/^[A-Za-z]:$/.test(dir)) dir = `${dir}/`;
     const name = trimmed.slice(index + 1);
     groups.set(dir, [...(groups.get(dir) ?? []), name]);
   }

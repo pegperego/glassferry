@@ -21,7 +21,7 @@ import { clickSelect, emptySelection, moveCursor, selectAll, toggleSort, type So
 import { formatOwner, formatPermissions, formatSize, formatTime, ownerTitle } from "../format";
 import type { DragPayload, Side } from "../dnd";
 import { beginPointerDrag, registerDropZone, useDragState, type DropZone } from "../pointerDrag";
-import { joinPath, parentPath, pathSegments } from "../paths";
+import { IS_WINDOWS, isAbsolutePath, joinPath, parentPath, pathSegments } from "../paths";
 import type { PaneState } from "../usePane";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { PromptDialog, nameError } from "./Dialogs";
@@ -122,6 +122,8 @@ type Dialog =
 
 export function FilePane(props: Props) {
   const { pane, title, actions, info, color, active, onActivate, side, ops, transfer, onDropFiles, openFile, bookmarks } = props;
+  /** Windows local pane: "/" lists the drives (see paths.ts). */
+  const drives = side === "local" && IS_WINDOWS;
   const transferTargets = props.transferTargets ?? [];
   const acceptsFrom = props.acceptsFrom ?? [];
   const { path, visible, selection, sort } = pane;
@@ -208,14 +210,14 @@ export function FilePane(props: Props) {
 
   const open = (entry: FileEntry) => {
     if (path === null) return;
-    if (isDirLike(entry)) void pane.navigate(joinPath(path, entry.name));
-    else if (entry.kind === "file" || entry.kind === "symlink") openFile?.run(joinPath(path, entry.name));
+    if (isDirLike(entry)) void pane.navigate(joinPath(path, entry.name, drives));
+    else if (entry.kind === "file" || entry.kind === "symlink") openFile?.run(joinPath(path, entry.name, drives));
   };
 
   const goUp = () => {
     if (path === null || path === "/") return;
     const from = path.replace(/\/+$/, "").split("/").pop();
-    void pane.navigate(parentPath(path), from);
+    void pane.navigate(parentPath(path, drives), from);
   };
 
   const startRename = (name: string | null) => {
@@ -334,7 +336,7 @@ export function FilePane(props: Props) {
 
   const folderPath = (entry: string | null) => {
     const found = entry === null ? undefined : visible.find((v) => v.name === entry);
-    return found && isDirLike(found) && path !== null ? joinPath(path, found.name) : null;
+    return found && isDirLike(found) && path !== null ? joinPath(path, found.name, drives) : null;
   };
 
   const zone: DropZone = {
@@ -396,11 +398,11 @@ export function FilePane(props: Props) {
     const items: MenuItem[] = [];
     if (entry && isDirLike(entry) && chosen.length === 1) items.push({ label: "Apri", shortcut: "↩", onSelect: () => open(entry) });
     if (entry && isDirLike(entry) && chosen.length === 1 && ops.openTerminal && path)
-      items.push({ label: "Apri nel terminale", onSelect: () => terminalAt(joinPath(path, entry.name)) });
+      items.push({ label: "Apri nel terminale", onSelect: () => terminalAt(joinPath(path, entry.name, drives)) });
     if (entry && !isDirLike(entry) && openFile && chosen.length === 1)
       items.push({ label: openFile.label, shortcut: "↩", onSelect: () => open(entry) });
     if (entry && !isDirLike(entry) && entry.kind !== "other" && chosen.length === 1 && path)
-      items.push({ label: "Segui (tail)", onSelect: () => setDialog({ kind: "tail", path: joinPath(path, entry.name) }) });
+      items.push({ label: "Segui (tail)", onSelect: () => setDialog({ kind: "tail", path: joinPath(path, entry.name, drives) }) });
     if (entry && transfer) items.push({ label: transfer.label, shortcut: "F5", onSelect: () => transfer.run(chosen) });
     if (entry && transferTargets.length > 1)
       for (const target of transferTargets) items.push({ label: target.label, onSelect: () => target.run(chosen) });
@@ -415,7 +417,7 @@ export function FilePane(props: Props) {
         ...(chosenDirs.length > 0
           ? [{ label: chosenDirs.length === 1 ? "Calcola dimensione" : `Calcola dimensione (${chosenDirs.length} cartelle)`, onSelect: () => computeSizes(chosenDirs) }]
           : []),
-        { label: "Copia percorso", onSelect: () => path && void navigator.clipboard.writeText(joinPath(path, entry.name)) },
+        { label: "Copia percorso", onSelect: () => path && void navigator.clipboard.writeText(joinPath(path, entry.name, drives)) },
         { separator: true },
         {
           label: ops.permanentDelete ? "Elimina…" : "Sposta nel Cestino",
@@ -469,7 +471,7 @@ export function FilePane(props: Props) {
         <strong className="pane-title">{title}</strong>
         <nav className="breadcrumb">
           {path !== null &&
-            pathSegments(path).map((segment) => (
+            pathSegments(path, drives).map((segment) => (
               <button key={segment.path} onClick={() => void pane.navigate(segment.path)}>
                 {segment.name}
               </button>
@@ -626,7 +628,7 @@ export function FilePane(props: Props) {
           onOpen={(found, isDir) => {
             setDialog(null);
             // A folder opens; a file shows in its folder, under the cursor.
-            void (isDir ? pane.navigate(found) : pane.navigate(parentPath(found), found.slice(found.lastIndexOf("/") + 1)));
+            void (isDir ? pane.navigate(found) : pane.navigate(parentPath(found, drives), found.slice(found.lastIndexOf("/") + 1)));
             listRef.current?.focus();
           }}
         />
@@ -695,7 +697,7 @@ export function FilePane(props: Props) {
           label="Cartella di destinazione"
           initial={path}
           confirmLabel="Sposta"
-          validate={(v) => (v.startsWith("/") ? (v === path ? "È la cartella attuale" : null) : "Serve un percorso assoluto")}
+          validate={(v) => (isAbsolutePath(v, drives) ? (v === path ? "È la cartella attuale" : null) : "Serve un percorso assoluto")}
           onCancel={() => setDialog(null)}
           onSubmit={(dst) => {
             setDialog(null);

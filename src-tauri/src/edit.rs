@@ -938,8 +938,16 @@ async fn write_replacing(session: &Session, path: &str, part: &str, content: &[u
 
 /// macOS: `open [-a app] path`. Linux: `xdg-open path`, or the configured
 /// command with the path as its last argument (`sh -c`, so it can carry
-/// options, e.g. `code --new-window`).
+/// options, e.g. `code --new-window`). Windows: the configured program
+/// (an `.exe`) with the path, or Explorer, which opens it with the default
+/// app.
 fn open_command(path: &str, app: Option<&str>) -> std::process::Command {
+    if cfg!(windows) {
+        let native = crate::platform::native_path(path);
+        let mut command = std::process::Command::new(app.unwrap_or("explorer.exe"));
+        command.arg(native);
+        return command;
+    }
     match app {
         Some(app) if cfg!(target_os = "macos") => {
             let mut command = std::process::Command::new("open");

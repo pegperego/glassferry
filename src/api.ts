@@ -400,8 +400,8 @@ export const fsSearch = (target: Target, dir: string, query: SearchQuery, search
 
 export const fsSearchCancel = (searchId: number) => invoke<void>("fs_search_cancel", { searchId });
 
-/** How a file is followed: `tail -F` (remote shell or local) or SFTP polling. */
-export type TailMethod = "tail" | "sftp";
+/** How a file is followed: `tail -F` (remote shell or local), SFTP polling, or polling a local file (Windows). */
+export type TailMethod = "tail" | "sftp" | "poll";
 
 export type TailEvent =
   /** New complete lines; `offset` is the file position after them. */

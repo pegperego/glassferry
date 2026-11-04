@@ -205,3 +205,37 @@ pub fn overlapped_pipe(inbound: bool) -> std::io::Result<(tokio::net::windows::n
         Ok((server, OwnedHandle::from_raw_handle(client as RawHandle)))
     }
 }
+
+/// A local path as the panes show it (`/` separators) turned into this
+/// system's form, for APIs that want it (the Recycle Bin, Explorer).
+pub fn native_path(path: &str) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        std::path::PathBuf::from(path.replace('/', "\\"))
+    }
+    #[cfg(unix)]
+    {
+        std::path::PathBuf::from(path)
+    }
+}
+
+/// A local path from the system in the panes' form (`C:/Users/x` on Windows).
+pub fn pane_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) { text.replace('\\', "/") } else { text.into_owned() }
+}
+
+/// Windows: the drive letters present ("C:", "D:"…), for the local pane's
+/// virtual root. Empty elsewhere.
+pub fn drives() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        // SAFETY: no arguments, returns a bitmask.
+        let mask = unsafe { windows_sys::Win32::Storage::FileSystem::GetLogicalDrives() };
+        (0..26u8).filter(|i| mask & (1 << i) != 0).map(|i| format!("{}:", (b'A' + i) as char)).collect()
+    }
+    #[cfg(unix)]
+    {
+        Vec::new()
+    }
+}

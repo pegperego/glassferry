@@ -111,7 +111,7 @@ pub mod local {
         for name in names {
             validate_name(name)?;
         }
-        let paths: Vec<PathBuf> = names.iter().map(|n| PathBuf::from(join(dir, n))).collect();
+        let paths: Vec<PathBuf> = names.iter().map(|n| crate::platform::native_path(&join(dir, n))).collect();
         let mut op = logger.start(
             None,
             Channel::Local,

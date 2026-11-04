@@ -24,6 +24,24 @@ pub async fn list_dir(logger: &Arc<Logger>, path: PathBuf) -> Result<Vec<FileEnt
 }
 
 fn list_dir_blocking(path: &Path) -> Result<Vec<FileEntry>> {
+    // Windows: "/" is the panes' virtual root, the list of drives.
+    if cfg!(windows) && path == Path::new("/") {
+        return Ok(crate::platform::drives()
+            .into_iter()
+            .map(|name| FileEntry {
+                name,
+                kind: EntryKind::Dir,
+                target_is_dir: false,
+                size: None,
+                modified: None,
+                permissions: None,
+                uid: None,
+                gid: None,
+                owner: None,
+                group: None,
+            })
+            .collect());
+    }
     let mut entries = Vec::new();
     for dirent in std::fs::read_dir(path)? {
         let dirent = dirent?;

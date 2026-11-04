@@ -455,7 +455,7 @@ async fn list_dir(state: State<'_, AppState>, session_id: u64, path: String) -> 
 
 #[tauri::command]
 fn local_home() -> Result<String> {
-    Ok(local::home()?.to_string_lossy().into_owned())
+    Ok(platform::pane_path(&local::home()?))
 }
 
 #[tauri::command]
@@ -783,7 +783,7 @@ fn local_open(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -
     let op = state.logger.start(None, log::Channel::Local, "open", &path);
     op.result(
         app.opener()
-            .open_path(&path, None::<&str>)
+            .open_path(platform::native_path(&path).to_string_lossy(), None::<&str>)
             .map_err(|e| AppError::Other(e.to_string())),
         |_| None,
     )

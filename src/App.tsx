@@ -55,6 +55,7 @@ import {
   type Protection,
 } from "./connections";
 import { groupByParent, remoteSide, slotOf, type DragPayload, type Side } from "./dnd";
+import { toPanePath } from "./paths";
 import { usePersistentState } from "./settings";
 import { useActivityLog } from "./useActivityLog";
 import { useConnections } from "./useConnections";
@@ -257,7 +258,7 @@ export default function App() {
       if (event.payload.type !== "drop") return;
       const ratio = window.devicePixelRatio || 1;
       const { x, y } = event.payload.position;
-      finderDropRef.current(event.payload.paths, x / ratio, y / ratio);
+      finderDropRef.current(event.payload.paths.map(toPanePath), x / ratio, y / ratio);
     });
     return () => {
       void unlisten.then((fn) => fn());

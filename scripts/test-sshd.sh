@@ -4,6 +4,10 @@
 #   scripts/test-sshd.sh start   # sshd on 127.0.0.1:2222 (shell) and :2223 (SFTP only)
 #   scripts/test-sshd.sh stop
 #
+# GF_SSHD_LISTEN=192.168.64.1 scripts/test-sshd.sh start also listens on that
+# address (e.g. the Mac as seen from a UTM virtual machine) and writes
+# .dev-sshd/vm/ (ssh config + key) for the client inside the VM.
+#
 # Hosts (use .dev-sshd/ssh as the ssh binary, it adds -F .dev-sshd/ssh_config):
 #   gf-local      key with passphrase "segreta", host key prompt on first use
 #   gf-sftponly   ForceCommand internal-sftp (no shell)
@@ -27,10 +31,13 @@ stop() {
     done
 }
 
+LISTEN_EXTRA=${GF_SSHD_LISTEN:-}
+
 write_sshd_config() { # port name extra
     cat > "$DIR/sshd-$2.conf" <<EOF
 Port $1
 ListenAddress 127.0.0.1
+${LISTEN_EXTRA:+ListenAddress $LISTEN_EXTRA}
 HostKey $DIR/hostkey
 PidFile $DIR/sshd-$2.pid
 AuthorizedKeysFile $DIR/authorized_keys
@@ -82,6 +89,30 @@ start() {
     /usr/sbin/sshd -f "$DIR/sshd-shell.conf" -E "$DIR/sshd-shell.log"
     /usr/sbin/sshd -f "$DIR/sshd-sftponly.conf" -E "$DIR/sshd-sftponly.log"
     echo "sshd listening on 127.0.0.1:2222 and :2223 (fixture in $DIR)"
+    if [ -n "$LISTEN_EXTRA" ]; then
+        write_vm_bundle
+        echo "also on $LISTEN_EXTRA; client files for the VM in $DIR/vm/"
+    fi
+}
+
+# Config and key for an ssh client on another machine (a VM): copy the files
+# to ~/.ssh/ there. The key path uses ~ so it works with Windows OpenSSH too.
+write_vm_bundle() {
+    rm -rf "$DIR/vm"
+    mkdir -p "$DIR/vm"
+    cp "$DIR/userkey" "$DIR/vm/gf-userkey"
+    for entry in "gf-local 2222" "gf-sftponly 2223"; do
+        set -- $entry
+        cat >> "$DIR/vm/config" <<EOF
+Host $1
+  HostName $LISTEN_EXTRA
+  Port $2
+  User $(id -un)
+  IdentityFile ~/.ssh/gf-userkey
+  IdentitiesOnly yes
+
+EOF
+    done
 }
 
 case "${1:-}" in

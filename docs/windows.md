@@ -1,6 +1,6 @@
 # Supporto per Windows
 
-Analisi del 2026-11-03. Stato: proposte accettate, da cominciare con la prova di fattibilità (fase 0). Voce collegata in [`roadmap.md`](roadmap.md).
+Analisi del 2026-11-03. Stato: proposte accettate; prova di fattibilità (fase 0) in corso dal 2026-11-04, risultati sotto. Voce collegata in [`roadmap.md`](roadmap.md).
 
 ## Il problema: niente ControlMaster
 
@@ -63,6 +63,25 @@ In modalità solo SFTP si perdono gli archivi, chown/chgrp e la copia lato serve
 | Archivi locali | `tar.exe` (bsdtar) di Windows 10+, che estrae anche gli zip |
 | Tail locale | niente `tail`: in locale la lettura a intervalli (rivedere la scelta in [`architecture.md`](architecture.md) §18) |
 | CI | job `windows-latest` in `ci.yml` e `release.yml` |
+
+## Prova di fattibilità (fase 0)
+
+2026-11-04, VM Windows 11 Pro ARM in UTM su Mac M4 Pro, contro la fixture sshd del Mac (`GF_SSHD_LISTEN=192.168.64.1 scripts/test-sshd.sh start`, file per la VM in `.dev-sshd/vm/`).
+
+| Prova | Esito |
+|---|---|
+| Versione dell'ssh di sistema | `OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2`: sopra la 8.4 richiesta |
+| Askpass con l'ssh di Microsoft (`SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force`, helper `.cmd`) | ✅ la passphrase arriva dall'helper, nessuna richiesta nel terminale |
+| Askpass con ssh avviato senza console visibile (`Start-Process -WindowStyle Hidden`, output rediretto) | ✅ funziona: è il modo in cui l'app avvierà ssh |
+| ControlMaster con l'ssh di Microsoft | ❌ `getsockname failed: Not a socket` (come atteso) |
+| ssh di Git for Windows (`OpenSSH_10.6p1`, MSYS2) | legge `~/.ssh/config` e la chiave di Windows, ma rifiuta una chiave con a capo CRLF (`invalid format`) che l'ssh di Microsoft accetta; l'askpass funziona anche lì |
+| ControlMaster con l'ssh di Git for Windows | ❌ il master parte (`-O check`: `Master running`), ma ogni canale fallisce (`mux_client_request_session: read from master failed: Connection reset by peer`) e ssh ripiega in silenzio su una connessione nuova con una nuova autenticazione (`Authenticated to …` a ogni comando) |
+| SFTP con l'ssh di Microsoft | ✅ `sftp gf-sftponly` interattivo, passphrase dall'askpass. Con `sftp -b` no: la modalità batch passa a ssh `BatchMode=yes`, che disattiva anche l'askpass (vale ovunque, non solo su Windows) |
+
+Conclusioni:
+- L'askpass funziona anche senza console: la modalità solo SFTP (2a) è fattibile.
+- Nessun ssh disponibile su Windows ha un ControlMaster utilizzabile: con Git for Windows il master *sembra* attivo ma non viene usato. La rilevazione di 2c non può fermarsi a `-O check`: deve aprire un canale e verificare che non ci sia una seconda autenticazione (per esempio con `-o BatchMode=yes` sul canale, che fallisce invece di riautenticarsi). In pratica su Windows la base è la sessione senza master.
+- Restano da verificare dall'app vera: named pipe per l'askpass, eseguibile dell'app come helper (programma grafico che restituisce la risposta su stdout), `CREATE_NO_WINDOW`, SFTP su stdin/stdout con `openssh_sftp_client`.
 
 ## Fasi
 

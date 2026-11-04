@@ -1,6 +1,6 @@
 # Supporto per Windows
 
-Analisi del 2026-11-03. Stato: proposte accettate; prova di fattibilità (fase 0) in corso dal 2026-11-04, risultati sotto. Voce collegata in [`roadmap.md`](roadmap.md).
+Analisi del 2026-11-03. Stato: proposte accettate; prova di fattibilità (fase 0) fatta il 2026-11-04: fattibile, con le pipe sovrapposte da creare a mano (risultati sotto). Voce collegata in [`roadmap.md`](roadmap.md).
 
 ## Il problema: niente ControlMaster
 
@@ -81,7 +81,26 @@ In modalità solo SFTP si perdono gli archivi, chown/chgrp e la copia lato serve
 Conclusioni:
 - L'askpass funziona anche senza console: la modalità solo SFTP (2a) è fattibile.
 - Nessun ssh disponibile su Windows ha un ControlMaster utilizzabile: con Git for Windows il master *sembra* attivo ma non viene usato. La rilevazione di 2c non può fermarsi a `-O check`: deve aprire un canale e verificare che non ci sia una seconda autenticazione (per esempio con `-o BatchMode=yes` sul canale, che fallisce invece di riautenticarsi). In pratica su Windows la base è la sessione senza master.
-- Restano da verificare dall'app vera: named pipe per l'askpass, eseguibile dell'app come helper (programma grafico che restituisce la risposta su stdout), `CREATE_NO_WINDOW`, SFTP su stdin/stdout con `openssh_sftp_client`.
+
+### Seconda parte: dall'eseguibile (2026-11-04)
+
+Esempio Rust a parte, [`spikes/windows/`](../spikes/windows/) (il crate dell'app non compila su Windows), compilato nella VM (Rust 1.99 `aarch64-pc-windows-msvc`, Visual Studio Build Tools) e lanciato via SSH dal Mac (OpenSSH Server attivo nella VM, chiave `~/.ssh/gf-vm`). Come l'app, un solo eseguibile grafico (`windows_subsystem = "windows"`) che fa anche da helper askpass.
+
+| Prova | Esito |
+|---|---|
+| `openssh-sftp-client` e Tokio su Windows ARM64 | ✅ compilano |
+| Askpass su named pipe (`\\.\pipe\…`, token, `reject_remote_clients`) con l'eseguibile grafico come helper | ✅ la passphrase arriva all'app e torna a ssh |
+| `CREATE_NO_WINDOW` | ✅ nessun problema (da guardare a occhio dal desktop: nessuna finestra di console) |
+| stdout di ssh su file | ✅ |
+| **stdout di ssh su pipe di Rust/Tokio** (e anche su pipe anonima `CreatePipe`) | ❌ **ssh si autentica, esegue il comando e poi resta bloccato**, ogni volta. Lo stderr su pipe invece va bene |
+| stdout su named pipe **sovrapposta da entrambi i lati** (`FILE_FLAG_OVERLAPPED` anche sull'handle del processo figlio, come fa `sftp.exe`) | ✅ sempre, ~250 ms |
+| SFTP con stdin e stdout su pipe sovrapposte da entrambi i lati | ✅ apertura 230–260 ms, `realpath`, `readdir` (209 voci), scrittura + lettura + cancellazione |
+| Chiusura della sessione SFTP (`Sftp::close`) | ❌ non termina, e ssh non esce: la fine dello stdin non arriva a ssh. Da capire; intanto chiudere = terminare il processo ssh |
+
+Conseguenze per la fase 1:
+- **Le pipe verso ssh vanno create a mano**: named pipe con `FILE_FLAG_OVERLAPPED` su entrambi gli handle; il lato dell'app avvolto in `tokio::net::windows::named_pipe::NamedPipeServer`, quello del figlio ereditabile (`Stdio::from(OwnedHandle)`). `Stdio::piped()` non funziona con l'OpenSSH di Microsoft. Vale per il canale SFTP e per ogni exec di cui si legge lo stdout.
+- Askpass: named pipe al posto del socket Unix, stesso schema a token; l'eseguibile dell'app può restare l'helper.
+- Chiusura di una sessione senza master: terminare il processo ssh dopo `close` (con un timeout breve), finché non si capisce perché l'EOF dello stdin non arriva.
 
 ## Fasi
 

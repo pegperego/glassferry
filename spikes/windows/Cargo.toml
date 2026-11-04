@@ -1,0 +1,22 @@
+# Windows feasibility check (docs/windows.md, phase 0): askpass over a named
+# pipe with the app's own GUI-subsystem binary as helper, ssh started with
+# CREATE_NO_WINDOW, SFTP over ssh's stdin/stdout with openssh-sftp-client.
+# Standalone (not part of the app's crate, which does not build on Windows).
+[package]
+name = "gf-windows-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+openssh-sftp-client = "0.15.10"
+futures-util = "0.3"
+os_pipe = "1"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Pipes"] }
+
+[workspace]
+
+[features]
+# Console-subsystem build, to compare with the GUI one.
+console = []

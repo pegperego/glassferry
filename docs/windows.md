@@ -1,6 +1,6 @@
 # Supporto per Windows
 
-Analisi del 2026-11-03. Stato: proposte accettate; prova di fattibilità (fase 0) fatta il 2026-11-04: fattibile, con le pipe sovrapposte da creare a mano (risultati sotto). Voce collegata in [`roadmap.md`](roadmap.md).
+Analisi del 2026-11-03. Stato: fase 0 (prova di fattibilità) fatta il 2026-11-04; fase 1 (solo SFTP) sviluppata il 2026-11-05 e provata nell'app il 2026-11-06. Prossima: CI e pacchetto (fase 1, ultima parte), poi fase 2. Voce collegata in [`roadmap.md`](roadmap.md).
 
 ## Il problema: niente ControlMaster
 
@@ -114,3 +114,13 @@ Conseguenze per la fase 1:
 - In quale wave (dipende da chi lo userà: il team o il pubblico).
 - Requisito OpenSSH ≥ 8.4, segnalato in Impostazioni come già oggi la versione minima.
 - La firma a pagamento.
+
+## Fase 1 realizzata (2026-11-05)
+
+- `platform.rs` raccoglie le differenze (bit di permesso, uid/gid, dispositivo, stesso file, errore "volume diverso", file privati, console nascosta, processi vivi, pipe sovrapposte, unità, percorsi nativi).
+- `session.rs`: `MULTIPLEXED = cfg!(unix)`. Senza master `start_master` non avvia niente, il canale SFTP è la connessione (diagnostica con `-E` nel file di log della sessione, letto in caso di errore), il probe è saltato (`Capabilities.probed = false`: il terminale remoto resta offerto), `exec` rifiuta, la chiusura aspetta 2 s e termina ssh.
+- Pipe verso ssh: named pipe sovrapposte da entrambi i lati, il lato dell'app registrato con Tokio **dopo** che il figlio ha aperto il suo (altrimenti i dati non passano).
+- Askpass: named pipe `\\.\pipe\glassferry-askpass-<pid>-<parte del token>`, `reject_remote_clients`, nuova istanza a ogni connessione, l'helper riprova se la pipe è occupata.
+- Locale: percorsi con `/` (`C:/Users/x`), `/` = elenco delle unità (solo nel pannello locale), Cestino ed Explorer con percorsi nativi, file modificati aperti con Explorer o con l'`.exe` della regola, archivi con `tar.exe`, terminale = nuova console con PowerShell o ssh, tail locale a intervalli.
+- Cartelle: configurazione in `%APPDATA%\glassferry`, log in `%LOCALAPPDATA%\glassferry\logs`, runtime in `%LOCALAPPDATA%\glassferry\run`, copie in modifica nella cache; ssh predefinito `C:\Windows\System32\OpenSSH\ssh.exe`; `Include "%PROGRAMDATA%/ssh/ssh_config"` nel config generato.
+- Compilare: `cargo build --release --features tauri/custom-protocol` (senza la feature l'app cerca l'interfaccia sul server di sviluppo); su Windows ARM serve clang (LLVM) per `ring`. Gli esempi in `examples/` restano solo Unix: su Windows `cargo clippy --lib --bins --tests`.

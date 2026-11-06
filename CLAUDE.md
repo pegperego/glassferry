@@ -13,6 +13,10 @@ Never parse or reinterpret the user's `~/.ssh/config`. All connections go throug
 - Shell commands are an optional accelerator: `probe()` detects shell access and available commands; SFTP must always work alone (SFTP-only accounts). Remote commands are built only with `sh_command(script, args)` (paths as positional params, `env LC_ALL=C sh -c`), never by string concatenation.
 - Only add ssh options that are strictly required (listed above). Any new override needs a justification in a comment.
 
+## Windows
+
+Phase 1 (SFTP only) is implemented, see `docs/windows.md`. Platform differences live in `platform.rs`. Microsoft's OpenSSH has no ControlMaster: `session::MULTIPLEXED` is false on Windows, a session is one `ssh -s sftp` process (stdin/stdout on named pipes overlapped on both ends, from `platform::overlapped_pipe`; `Stdio::piped()` makes that ssh hang), the probe is skipped (`Capabilities.probed` false, shell commands refused), closing ends ssh. Askpass uses a named pipe. Local paths use `/` (`C:/Users/x`) and `/` lists the drives (local pane only: `paths.ts` `drives`); `platform::native_path` for Windows APIs. Remote paths are POSIX: never `Path::join`/`Path::is_absolute` on them. Build: `cargo build --release --features tauri/custom-protocol` (clang needed on ARM for `ring`); check with `cargo clippy --lib --bins --tests` (examples are Unix-only). VM checks: UTM, OpenSSH Server in the guest, fixture with `GF_SSHD_LISTEN=192.168.64.1 scripts/test-sshd.sh start`.
+
 ## Askpass
 
 The app binary is also the `SSH_ASKPASS` helper (`askpass.rs`): when started with `GF_ASKPASS_SOCKET` it forwards the prompt to the running app over a Unix socket (token-authenticated) and prints the answer. The app emits `askpass-request` to the UI; the UI answers with the `askpass_respond` command. Prompt kinds: `secret`, `confirm`, `notice`, `hostKey`.
@@ -105,6 +109,7 @@ Backend (`src-tauri/src/`):
 - `ids.rs` — owner/group names (see File operations)
 - `log.rs` — activity log (ring buffer, events, rotating file)
 - `entry.rs` (`FileEntry`, shared by both panes), `local.rs` (local listing)
+- `platform.rs` — Unix/Windows differences (see Windows)
 - `update.rs` — app updates (see Updates)
 - `tail.rs` — following a file (see Following a file)
 - `transfer.rs`, `fileops.rs`, `attrs.rs`, `dirsize.rs`, `search.rs`, `archive.rs`, `edit.rs`, `diff.rs`, `plan.rs` — see the sections above
@@ -120,8 +125,8 @@ Frontend (`src/`):
   - dialogs: `AskpassDialog`, `ConflictDialog` (transfers), `EditConflictDialog`, `EditConfirmDialog`, `PlanDialog` (previewed operations), `Protection` (`ProtectionBanner`, `NameGate`, `CommandPreview`), `Dialogs` (`PromptDialog`, `ConfirmDialog`, `ChooseDialog`, `nameError`)
 - hooks: `usePane.ts` (path, entries, sort, hidden files, selection), `useRemoteSlots.ts` (the two remote slots, shared sessions), `useConnections.ts`, `useActivityLog.ts`, `useTransfers.ts`, `useEdits.ts`, `useUpdates.ts`, `useTail.ts`
 - `pointerDrag.ts` — pane-to-pane drag & drop with pointer events (see Transfers)
-- pure modules (tested with vitest): `connections.ts` (search, import, merge, validation mirroring the backend), `fileList.ts` (sorting/selection), `logStore.ts` (log merge/filter), `dnd.ts` (drag payload, grouping by parent), `updates.ts` (update checks, restart impact), `tailView.ts` (tail buffer, regex filter, highlights)
-- `paths.ts` (remote POSIX paths), `format.ts`, `settings.ts` (`usePersistentState`, localStorage with safe fallbacks)
+- pure modules (tested with vitest): `paths.ts` (pane paths, drives on Windows), `connections.ts` (search, import, merge, validation mirroring the backend), `fileList.ts` (sorting/selection), `logStore.ts` (log merge/filter), `dnd.ts` (drag payload, grouping by parent), `updates.ts` (update checks, restart impact), `tailView.ts` (tail buffer, regex filter, highlights)
+- `format.ts`, `settings.ts` (`usePersistentState`, localStorage with safe fallbacks)
 
 Other:
 - `src-tauri/icons/icon.svg` — icon source; regenerate every size with `pnpm tauri icon <1024 px png>` (drop the android/ios outputs)

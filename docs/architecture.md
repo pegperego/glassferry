@@ -194,5 +194,5 @@ Fuori dalla prima versione: più file uniti in una vista, file compressi, seguir
 
 ## 19. Windows
 
-(2026-11-03, da realizzare) Tolto dal fuori scope. L'OpenSSH di Microsoft non supporta il ControlMaster, quindi la sessione avrà due modi scelti in base all'ssh configurato: con master (quello di oggi) quando funziona, altrimenti un solo processo `ssh -s sftp` con la shell disattivata, e in seguito una connessione per comando shell quando l'autenticazione non chiede niente. Resta l'ssh di sistema come predefinito (config e agent come nel terminale); un ssh incluso nell'app è solo un ripiego esplicito per versioni troppo vecchie. Analisi completa, opzioni scartate e fasi in [`windows.md`](windows.md).
+(2026-11-03; fase 1 realizzata il 2026-11-05, dettagli in [`windows.md`](windows.md)) Tolto dal fuori scope. L'OpenSSH di Microsoft non supporta il ControlMaster, quindi la sessione avrà due modi scelti in base all'ssh configurato: con master (quello di oggi) quando funziona, altrimenti un solo processo `ssh -s sftp` con la shell disattivata, e in seguito una connessione per comando shell quando l'autenticazione non chiede niente. Resta l'ssh di sistema come predefinito (config e agent come nel terminale); un ssh incluso nell'app è solo un ripiego esplicito per versioni troppo vecchie. Analisi completa, opzioni scartate e fasi in [`windows.md`](windows.md).
 

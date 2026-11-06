@@ -43,11 +43,10 @@ Sviluppo completato il 2026-11-03 (le voci sono in "Fatto"); da provare nell'app
 
 Il supporto per Windows, deciso il 2026-11-04 dopo la prova di fattibilità (analisi, opzioni e risultati in [`windows.md`](windows.md)). L'OpenSSH di Microsoft non ha il ControlMaster: la base è una sessione senza master, solo SFTP.
 
+Fase 1 (solo SFTP) sviluppata il 2026-11-05 e provata nell'app su Windows 11 ARM (VM UTM) il 2026-11-06: connessione con passphrase nella finestra dell'app, trasferimenti, modifica, tail remoto e locale, terminale, unità, chiusura senza processi ssh rimasti (le voci sono in "Fatto").
+
 | Voce | Stato | Proposta il | Note |
 |---|---|---|---|
-| Compilazione e avvio su Windows | in corso | 2026-11-03 | Codice Unix isolato per piattaforma (permessi, uid/gid, socket, `/bin/sh`, `/tmp`); cartelle di configurazione, log e runtime in `%APPDATA%` / `%LOCALAPPDATA%`; Portachiavi = Gestione credenziali |
-| Sessione senza master (solo SFTP) | da fare | 2026-11-03 | Askpass su named pipe, pipe sovrapposte da entrambi i lati verso ssh (`Stdio::piped()` blocca l'ssh di Microsoft), `CREATE_NO_WINDOW`, shell disattivata; chiusura = terminare ssh |
-| Parti locali su Windows | da fare | 2026-11-03 | Unità nel pannello locale, terminale (Windows Terminal, PowerShell), apertura con l'app predefinita, archivi con `tar.exe`, tail locale con la lettura a intervalli |
 | CI e pacchetto Windows | da fare | 2026-11-03 | Job `windows-latest` in `ci.yml`, installer NSIS in `release.yml`, voci Windows in `latest.json`; senza firma (SmartScreen avvisa) |
 | Comandi shell con una connessione per comando | da fare | 2026-11-03 | Solo con autenticazione non interattiva (`BatchMode=yes`); master riattivato se un ssh lo supporta davvero (prova con un canale, non `-O check`) |
 | Firma del codice e winget | proposta | 2026-11-03 | Azure Trusted Signing (circa 10 $ al mese), poi pacchetto winget |
@@ -109,3 +108,6 @@ Scelte esplicite, da riconsiderare solo con una motivazione nuova.
 | App di modifica dei file remoti per estensione (Impostazioni) | `709fae1` |
 | Aggiornamenti automatici con pacchetti firmati (provato su macOS il 2026-11-03: 0.3.0 di prova → 0.4.0) | `c641d4c`, `80e1893` |
 | Seguire un file (tail): `tail -F` con la shell e in locale, lettura via SFTP senza, finestra bloccante con filtro regex | `466ab36` |
+| Windows, fase 1: compila e parte (codice per piattaforma in `platform.rs`, askpass su named pipe, cartelle e Portachiavi di Windows) | `70eab7a` |
+| Windows, fase 1: sessione senza ControlMaster, solo SFTP, con pipe sovrapposte verso ssh | `f0087e4`, `8f88640` |
+| Windows, fase 1: unità e percorsi locali, app predefinite, tail locale a intervalli | `3e19ad2` |

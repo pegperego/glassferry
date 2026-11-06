@@ -5,7 +5,8 @@
 //! release; the app reads the one of the latest published release (drafts are
 //! not visible), so publishing a release by hand is what ships it. Packages
 //! are verified against the public key in `tauri.conf.json` before anything
-//! is installed: macOS replaces the `.app` bundle, Linux rewrites the AppImage
+//! is installed: macOS replaces the `.app` bundle, Windows runs the installer
+//! (which closes the app and starts the new version), Linux rewrites the AppImage
 //! or installs the `.deb`/`.rpm` through pkexec (the system asks for the
 //! administrator password). The new version runs after a restart, which the
 //! UI asks for (it may interrupt transfers).
@@ -35,7 +36,7 @@ pub struct UpdateInfo {
     pub notes: Option<String>,
     /// Publication date, RFC 3339.
     pub date: Option<String>,
-    /// How it would be installed: `app`, `appimage`, `deb`, `rpm`; `None`
+    /// How it would be installed: `app`, `appimage`, `deb`, `rpm`, `nsis`, `msi`; `None`
     /// when this build cannot install it (development build, unknown
     /// package): the UI links the release page instead.
     pub installer: Option<&'static str>,
@@ -68,6 +69,8 @@ fn installer() -> Option<&'static str> {
         BundleType::AppImage => Some("appimage"),
         BundleType::Deb => Some("deb"),
         BundleType::Rpm => Some("rpm"),
+        BundleType::Nsis => Some("nsis"),
+        BundleType::Msi => Some("msi"),
         _ => None,
     }
 }

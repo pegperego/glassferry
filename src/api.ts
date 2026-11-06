@@ -128,7 +128,7 @@ export interface UpdateInfo {
   /** RFC 3339. */
   date: string | null;
   /** How it installs; null: this build cannot update itself (open the release page). */
-  installer: "app" | "appimage" | "deb" | "rpm" | null;
+  installer: "app" | "appimage" | "deb" | "rpm" | "nsis" | "msi" | null;
 }
 
 export interface UpdateProgress {

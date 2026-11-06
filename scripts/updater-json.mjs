@@ -32,6 +32,9 @@ function assets(version) {
     "linux-aarch64-appimage": `Glassferry_${v}_aarch64.AppImage`,
     "linux-aarch64-deb": `Glassferry_${v}_arm64.deb`,
     "linux-aarch64-rpm": `Glassferry-${v}-1.aarch64.rpm`,
+    "windows-x86_64": `Glassferry_${v}_x64-setup.exe`,
+    "windows-x86_64-nsis": `Glassferry_${v}_x64-setup.exe`,
+    "windows-x86_64-msi": `Glassferry_${v}_x64_en-US.msi`,
   };
 }
 

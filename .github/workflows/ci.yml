@@ -1,5 +1,6 @@
-# Type-check, tests and clippy on macOS and Linux for every push and pull
-# request. The fixture-based examples need a local sshd and stay manual.
+# Type-check, tests and clippy on macOS, Linux and Windows for every push and
+# pull request. The fixture-based examples need a local sshd and stay manual;
+# they are Unix-only, so Windows checks lib, bins and tests.
 name: CI
 
 on:
@@ -12,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-22.04]
+        os: [macos-latest, ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +45,14 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: cargo test
+        if: runner.os != 'Windows'
+        working-directory: src-tauri
+      - run: cargo test --lib
+        if: runner.os == 'Windows'
         working-directory: src-tauri
       - run: cargo clippy --all-targets -- -D warnings
+        if: runner.os != 'Windows'
+        working-directory: src-tauri
+      - run: cargo clippy --lib --bins --tests -- -D warnings
+        if: runner.os == 'Windows'
         working-directory: src-tauri

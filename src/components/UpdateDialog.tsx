@@ -15,6 +15,8 @@ const INSTALL_NOTE: Record<string, string> = {
   appimage: "Sostituisce il file AppImage; la nuova versione parte al riavvio.",
   deb: "Installa il pacchetto .deb: il sistema chiede la password di amministratore.",
   rpm: "Installa il pacchetto .rpm: il sistema chiede la password di amministratore.",
+  nsis: "Avvia l'installazione: l'app si chiude e riparte con la nuova versione.",
+  msi: "Avvia l'installazione: l'app si chiude e riparte con la nuova versione.",
 };
 
 /** The update found (notes, install, restart) or the result of a manual check. */

@@ -415,12 +415,19 @@ impl Session {
                 let mut message = String::new();
                 let read = stderr.read_to_string(&mut message);
                 let _ = tokio::time::timeout(Duration::from_secs(2), read).await;
-                let message = message.trim();
-                let error = if message.is_empty() {
-                    e.into()
-                } else {
-                    AppError::Ssh(message.to_string())
-                };
+                let mut message = message.trim().to_string();
+                let mut op = op;
+                // Without a master the channel logs to the session's file (-E).
+                if message.is_empty() && !MULTIPLEXED {
+                    let log = launcher.read_log();
+                    if let Some(line) = last_meaningful_line(&log) {
+                        message = line.to_string();
+                    }
+                    if launcher.verbose {
+                        op.output(log);
+                    }
+                }
+                let error = if message.is_empty() { e.into() } else { AppError::Ssh(message) };
                 op.fail(&error);
                 return Err(error);
             }
@@ -537,6 +544,9 @@ impl Session {
         let _ = tokio::time::timeout(wait, sftp.close()).await;
         let _ = sftp_process.lock().unwrap().start_kill();
         launcher.stop_master().await;
+        if !MULTIPLEXED {
+            let _ = std::fs::remove_file(&launcher.log_path);
+        }
     }
 
     /// Ends the SFTP process (and so, without a master, the connection).

@@ -41,6 +41,7 @@ enum Start {
     /// `open -a <app> <script>`: the app opens the `.command` file.
     /// Ghostty too: `open -na Ghostty.app --args -e` would start a second
     /// instance, which restores the saved windows and tabs of the first one.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     OpenFile,
     /// `<program> <args> <script>`: the binary inside the bundle (macOS)
     /// or the command in the PATH (Linux).
